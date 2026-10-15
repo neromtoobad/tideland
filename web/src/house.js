@@ -15,6 +15,7 @@ const MOOD_LINE = {
   happy: "Content. Fed, rested, and somebody stopped by.", hungry: "Hungry. Nothing to eat in the house.", sleepy: "Exhausted. Hasn't slept in a long while.",
   sad: "Lonely. Nobody has visited today.", sleeping: "Asleep. Shh.", eating: "Eating. Mouth full.", waving: "Waving. A friend just came by!",
 }
+const ago = (b) => (b <= 30n ? "just now" : `${blocksToText(b)} ago`)
 const MOOD_BUBBLE = { hungry: "🍲", sleepy: "💤", sad: "💧", sleeping: "💤", eating: "😋", waving: "👋", happy: "☀️" }
 export const poseSprite = (look, mood) => `${look || "carpenter"}${{ happy: "", hungry: "-hungry", sleepy: "-sleepy", sad: "-sad", sleeping: "-sleeping", eating: "-eating", waving: "-waving" }[mood] ?? ""}`
 
@@ -83,7 +84,7 @@ export function createHouse(deps) {
       <p class="mood mood-${needs.mood}">${MOOD_LINE[needs.mood]}</p>
       <div class="diorama ${cur.hold ? "lifting" : ""}" id="h-diorama">
         <img class="home" src="${spriteUrl(h.style || "pine")}" alt="" style="transform: translateY(${(water(left) - 40) * 0.35}px)" />
-        <img class="islander" id="h-islander" src="${spriteUrl(poseSprite(h.look, mood))}" alt="" />
+        <img class="islander pose-${mood}" id="h-islander" src="${spriteUrl(poseSprite(h.look, mood))}" alt="" />
         <span class="bubble">${MOOD_BUBBLE[mood] ?? ""}</span>
         <div class="water" style="height:${water(left)}%"><i></i><i></i></div>
         <div class="gain" id="h-gain"></div>
@@ -110,9 +111,9 @@ export function createHouse(deps) {
     const t = needs.alive.filter((x) => x.kind === kind && (kind !== "visit" || !same(x.creator, cur.home.owner))).sort((a, b) => (a.expiresAt < b.expiresAt ? 1 : -1))[0]
     if (!t) return kind === "meal" ? "nothing to eat" : kind === "sleep" ? "hasn't slept" : "no visits today"
     if (kind === "meal") return `${esc(t.data.dish || t.dish || "a meal")}, ${same(t.creator, cur.home.owner) ? "caught themself" : `cooked by ${who(t.creator)}`} · ${blocksToText(t.expiresAt - head)}`
-    if (kind === "sleep") return `slept ${blocksToText(head - t.createdAt)} ago · ${blocksToText(t.expiresAt - head)}`
+    if (kind === "sleep") return `slept ${ago(head - t.createdAt)} · ${blocksToText(t.expiresAt - head)}`
     const n = new Set(needs.alive.filter((x) => x.kind === "visit" && !same(x.creator, cur.home.owner)).map((x) => x.creator.toLowerCase())).size
-    return `${n} ${n === 1 ? "friend" : "friends"} today · last ${blocksToText(head - t.createdAt)} ago`
+    return `${n} ${n === 1 ? "friend" : "friends"} today · last ${ago(head - t.createdAt)}`
   }
 
   const who = (a) => `<a href="#" data-legacy="${a}">${short(a)}</a>${same(a, state.wallet?.address) ? " (you)" : ""}`

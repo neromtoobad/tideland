@@ -431,8 +431,10 @@ document.addEventListener("click", (e) => { if (e.target.closest("[data-myhome]"
 $("cta-save").onclick = () => {
   const head = headNow()
   const homes = [...state.things.values()].filter((t) => t.kind === "home" && t.expiresAt > head && !same(t.owner, state.wallet?.address))
-  homes.sort((a, b) => (a.expiresAt < b.expiresAt ? -1 : 1))
-  if (!homes.length) return toast("No houses are sinking right now. Build one and share it.", 4000)
+  // worst off first: an islander who is hungry, exhausted or lonely, or whose house is going under
+  const need = (h) => { const m = state.moods?.get(h.key); return (m === "hungry" || m === "sad" || m === "sleepy" ? 0 : 1) * 1e9 + Number(h.expiresAt - head) }
+  homes.sort((a, b) => need(a) - need(b))
+  if (!homes.length) return toast("Everyone's fine right now. Move in and share your link.", 4000)
   house.open(homes[Math.floor(Math.random() * Math.min(3, homes.length))].key)
 }
 
@@ -498,7 +500,7 @@ function frame(now) {
   if (q.has("embed")) { state.embed = true; document.body.classList.add("embed") }
   const hk = q.get("h") || location.pathname.match(/^\/h\/(0x[0-9a-fA-F]{64})/)?.[1]
   if (hk) house.open(hk, { push: !location.pathname.startsWith("/h/") })
-  if (house.myHome() && !hk) $("cta-home").outerHTML = `<button class="storm-cta" id="cta-home" onclick="void 0" data-myhome="1">Your house <span>see who kept it afloat</span></button>`
+  if (house.myHome() && !hk) $("cta-home").outerHTML = `<button class="storm-cta" id="cta-home" data-myhome="1">Your islander <span>see how they're doing, and who came by</span></button>`
   if (q.has("run")) runner.openLobby()
   if (q.has("x") && q.has("y")) { const x = +q.get("x"), y = +q.get("y"); select({ x, y }); view.focus(x, y) }
 })()

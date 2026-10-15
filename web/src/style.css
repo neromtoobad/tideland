@@ -260,3 +260,7 @@ body.embed .house .close { display: none; }
 .bring { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
 .bring input { width: auto; }
 .diary li { grid-template-columns: 54px 1fr; }
+.diorama img.islander.pose-sleeping { height: 96px; right: 14px; bottom: 30px; }
+.diorama img.islander.pose-eating { height: 120px; }
+.diorama img.islander.pose-sad { height: 120px; }
+.holdbtn:hover:not([disabled]) { background: linear-gradient(135deg, #237a73, #31968a); }
