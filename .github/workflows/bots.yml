@@ -1,0 +1,22 @@
+# The founding guilds play every 20 minutes, in public. Anyone can read what they did in the run log.
+name: guilds
+on:
+  schedule: [{ cron: "*/20 * * * *" }]
+  workflow_dispatch:
+    inputs:
+      command: { description: "bots.mjs command", default: "tick" }
+concurrency: { group: guilds, cancel-in-progress: false }
+jobs:
+  play:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci --omit=dev --ignore-scripts
+      - run: node scripts/bots.mjs fund 0.05 && node scripts/bots.mjs ${{ github.event.inputs.command || 'tick' }}
+        env:
+          TREASURY_KEY: ${{ secrets.TREASURY_KEY }}
+          BOT_SEED: ${{ secrets.BOT_SEED }}
+          ARKIV_ACCESS_KEY: ${{ secrets.ARKIV_ACCESS_KEY }}

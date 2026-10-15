@@ -44,6 +44,8 @@ export function createView(canvas) {
     view.ox = innerWidth / 2 - (x - y) * (TW / 2) * z
     view.oy = innerHeight / 2 - (x + y + 1) * (TH / 2) * z
   }
+  view.splashes = []
+  view.splash = (t) => { if (t.x !== undefined) view.splashes.push({ x: t.x, y: t.y, at: performance.now() }) }
   view.resize(); view.fit()
   return view
 }
@@ -125,6 +127,17 @@ export function draw(view, world) {
     const cw = w * 0.34, chh = cw * (sprite.naturalHeight / sprite.naturalWidth)
     const bob = sad ? 0 : Math.sin(t * 3 + a.c.x) * 1.5 * zoom
     ctx.drawImage(sprite, sx + w * 0.14, sy + h * 0.95 - chh + bob, cw, chh)
+  }
+
+  // splashes: rings where something just went under
+  view.splashes = view.splashes.filter((p) => now - p.at < 3500)
+  for (const p of view.splashes) {
+    const k = (now - p.at) / 3500, { sx, sy } = view.toScreen(p.x, p.y)
+    for (const off of [0, 0.25, 0.5]) {
+      const q = k - off; if (q <= 0) continue
+      ctx.strokeStyle = `rgba(255,255,255,${(1 - q) * 0.9})`; ctx.lineWidth = 2.5 * zoom
+      ctx.beginPath(); ctx.ellipse(sx, sy + h / 2, w * (0.2 + q * 0.7), h * (0.2 + q * 0.7), 0, 0, Math.PI * 2); ctx.stroke()
+    }
   }
 
   // hover / selection outlines

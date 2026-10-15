@@ -72,6 +72,10 @@ button.ghost { background: transparent; }
 .tide li .sub { font-size: 11.5px; color: var(--muted); }
 .tide li .t { font: 600 12px "IBM Plex Mono", monospace; color: var(--sink); white-space: nowrap; }
 .tide li.calm .t { color: var(--muted); }
+.tide li.lost-h { display: block; cursor: default; font: 600 10.5px "IBM Plex Mono", monospace; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); padding-top: 10px; }
+.tide li.lost-h:hover { background: none; }
+.tide li.lost { opacity: .6; } .tide li.lost img { filter: grayscale(1) sepia(.3); }
+.tide li.lost .t a { color: var(--muted); font-weight: 400; }
 .tide .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
 
 /* inspector */

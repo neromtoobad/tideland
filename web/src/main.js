@@ -30,6 +30,8 @@ async function reading(fn) {
 const state = {
   things: new Map(), cells: new Map(), guilds: new Map(), tide: [],
   head: 0n, headAt: Date.now(), wallet: null, balance: null, busy: false, lastQuery: "",
+  lost: [], // structures seen this session whose expiry has passed: the tide took them
+  tenders: new Map(), // entityKey -> address that last extended it (read from the tx, see friction.md)
 }
 const view = createView($("world"))
 if (import.meta.env.DEV) window.__tl = { state, view }
@@ -37,7 +39,14 @@ if (import.meta.env.DEV) window.__tl = { state, view }
 // ---------------- data ----------------
 
 function rebuild() {
-  const all = [...state.things.values()].filter((t) => t.expiresAt > headNow())
+  const head = headNow()
+  for (const t of state.things.values()) {
+    if (t.kind === "structure" && t.expiresAt <= head && !state.lost.some((l) => l.key === t.key)) {
+      state.lost.unshift({ ...t, sankAt: Date.now() }); view.splash?.(t)
+    }
+  }
+  state.lost = state.lost.slice(0, 8)
+  const all = [...state.things.values()].filter((t) => t.expiresAt > head)
   state.cells = layout(all)
   state.guilds = new Map(all.filter((t) => t.kind === "guild").map((g) => [g.key, g]))
   const standing = all.filter((t) => t.kind === "structure").length
@@ -75,7 +84,17 @@ function watchLive() {
   const ws = publicClient({ ws: true })
   const touch = (e) => { if (e.entityKey) refreshOne(e.entityKey) }
   ws.watchEntityEvents({
-    onEntityCreated: touch, onExpiryExtended: (e) => { touch(e); ripple(e.entityKey, "renewed") },
+    onEntityCreated: touch,
+    onExpiryExtended: async (e) => {
+      touch(e)
+      // The event names the owner, not whoever extended it. For a lighthouse anyone can tend, read the sender.
+      try {
+        const tx = await pub.getTransaction({ hash: e.transactionHash })
+        state.tenders.set(e.entityKey, tx.from)
+        const t = state.things.get(e.entityKey)
+        ripple(e.entityKey, same(tx.from, t?.owner) ? "renewed by its holder" : `tended by ${short(tx.from)}`)
+      } catch { ripple(e.entityKey, "renewed") }
+    },
     onOwnershipTransferred: touch, onEntityPatched: touch,
     onEntityDeleted: (e) => { state.things.delete(e.entityKey); rebuild() },
     onError: (err) => console.warn("watch", err.message),
@@ -113,9 +132,12 @@ function renderTide() {
       <div><div class="nm">${esc(thingLabel(t))}</div><div class="sub">${t.x !== undefined ? `${t.x},${t.y} · ` : ""}held by ${short(t.owner)}</div></div>
       <div class="t">${blocksToText(t.expiresAt - head)}</div>
     </li>`).join("") : `<li class="empty">Nothing sinks in the next day. The coast is tended.</li>`
+  if (state.lost.length) $("tide-list").innerHTML += `<li class="lost-h">Lost to the tide this visit</li>` + state.lost.map((t) => `
+    <li class="lost" data-key="${t.key}" data-x="${t.x}" data-y="${t.y}"><img src="${thingSprite(t)}" alt="" /><div><div class="nm">${esc(thingLabel(t))}</div><div class="sub">${t.x},${t.y} · built by ${short(t.creator)}</div></div><div class="t"><a href="${EXPLORER}/entity/${t.key}" target="_blank" rel="noopener">history</a></div></li>`).join("")
 }
 $("tide-list").addEventListener("click", (e) => {
   const li = e.target.closest("li[data-key]"); if (!li) return
+  if (li.classList.contains("lost")) { const x = +li.dataset.x, y = +li.dataset.y; select({ x, y }); view.focus(x, y); return }
   const t = state.things.get(li.dataset.key)
   if (t?.x !== undefined) { select({ x: t.x, y: t.y }); view.focus(t.x, t.y) }
   else if (t?.kind === "guild") showGuild(t)
@@ -152,6 +174,7 @@ function renderInspector() {
       <dl class="kv">
         <dt>Built by</dt><dd>${who(s.creator)}</dd>
         <dt>Held by</dt><dd>${who(s.owner)}${!same(s.creator, s.owner) ? ` <span class="badge gold">inherited</span>` : ""}</dd>
+        ${state.tenders.has(s.key) && !same(state.tenders.get(s.key), s.owner) ? `<dt>Last tended by</dt><dd>${who(state.tenders.get(s.key))}</dd>` : ""}
         <dt>Entity</dt><dd><a href="${EXPLORER}/entity/${s.key}" target="_blank" rel="noopener">${short(s.key)}</a></dd>
       </dl>
       ${s.data.note ? `<p class="note">${esc(s.data.note)}</p>` : ""}
