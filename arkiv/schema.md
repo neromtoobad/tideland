@@ -14,7 +14,7 @@ draws the same world. Our web client is one implementation; [`cli/tide.mjs`](../
 |---|---|---|---|
 | `app` | `str` | `"tideland"` | Namespace filter, every query starts with it |
 | `world` | `str` | `"s1"` (season) | A new season is a new world without touching old data |
-| `kind` | `str` | `home` · `tend` · `parcel` · `structure` · `inscription` · `guild` · `run` | Type filter |
+| `kind` | `str` | `home` · `meal` · `sleep` · `visit` · `tend` · `parcel` · `structure` · `inscription` · `guild` · `run` | Type filter |
 
 Coordinates are **numbers** so regions are range queries: `x` and `y` are `i32` in `0..31`.
 
@@ -32,6 +32,30 @@ Coordinates are **numbers** so regions are range queries: `x` and `y` are `i32` 
 
 The client never lets you tend your own home: only other people can keep it alive, so a home lives exactly as long
 as somebody cares about it.
+
+### Islanders: needs are entities
+
+Each home has an islander (`look` attribute: `carpenter` · `mason` · `lamplighter`; payload `islander` name). Their
+needs are entities that point at the home with a `home key` attribute. **Each need's lifetime is the need's decay.**
+
+| Need | Entity `kind` | Lifetime | Who creates it | Owner |
+|---|---|---|---|---|
+| Food | `meal` (attrs `home key`, `dish str`) | **8 h** | the islander's owner (fishing) or **any visitor** (cooking) | the islander's owner: a cooked meal is handed over with `changeOwnership` in the same batch, so the **cook stays `$creator`** |
+| Rest | `sleep` (attr `home key`) | **12 h** | the owner | the owner |
+| Friends | `visit` (attr `home key`, payload `note`) | **24 h** | visitors only (the owner's own visits don't count) | the visitor |
+| Home | the `home` itself | ≤ **3 days** | anyone can extend it (`permissionlessExtension`) | the owner |
+
+All need entities are `readonly`. Mood and pose are derived on the client from which needs are alive: sleeping (first
+hour of a sleep), eating (first 15 min of a meal), waving (visit in the last 30 min), sad (house under 6 h, or no
+friends), hungry, sleepy, happy. The diary is written from the same entities.
+
+**A visit is one atomic batch of up to five operations:** create the `visit`; create a `meal` (its key predicted with
+`predictEntityKeys`, so the same batch can transfer it); extend the `home` to an absolute block; create the `tend`
+record; and `changeOwnership` of the meal to the islander's owner. Creates lead a batch and ownership changes come last,
+which is what makes the hand-over possible in one transaction.
+
+Homes built before islanders existed were **patched in place** (`patchEntity` setting `look` and the islander's name):
+homes are deliberately not `readonly`.
 
 ### `tend` — one save, a line in the guestbook
 
@@ -142,6 +166,7 @@ All expressed with the SDK query builder (`@arkiv-network/sdk/query`). `NOW` is 
 | A guild's standing footprint | `app = 'tideland' AND kind = 'structure' AND guild = key(guildKey)` |
 | Lighthouses going dark | `app = 'tideland' AND material = 'lighthouse' AND $expiresAt < u64(NOW + 7200)` |
 | The commons (run targets) | `app = 'tideland' AND world = 's1' AND kind = 'structure' AND (material = 'lighthouse' OR material = 'buoy' OR material = 'jetty' OR material = 'seawall')` |
+| Everything about one islander (needs, visits, saves) | `app = 'tideland' AND world = 's1' AND home = key(<home>)`: one query, 100 units |
 | A house's guestbook | `app = 'tideland' AND world = 's1' AND kind = 'tend' AND home = key(<home>)` |
 | Everyone a player has saved | `kind = 'tend'` + `createdBy(address)` |
 | Houses sinking now ("Save a sinking house") | `kind = 'home'`, sorted by `$expiresAt` client-side; also in the tide map query |

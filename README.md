@@ -1,5 +1,11 @@
 # Tideland
 
+**Islanders who need food, sleep and friends, in houses the tide is taking back.** Every need is an Arkiv entity with
+a lifetime: a meal feeds for 8 hours, sleep rests for 12, a friend's visit warms for 24, and the house can hold 3 days
+at most. You can fish and sleep for your islander; only *other people* can visit, cook for them, or keep the house
+afloat. A friend's visit is one atomic transaction that creates the visit, cooks a meal and hands it over (the cook stays
+`$creator`, your islander's owner becomes `$owner`), and shores up the house.
+
 **Your house sinks unless someone keeps it afloat.** Build a house on the coast; it starts with 12 hours and can never
 hold more than 3 days, and only *other people* can keep it alive. Share the link; a friend opens it, holds a button,
 and watches the water drain. Releasing seals one atomic Arkiv transaction that extends your house **and** writes their
@@ -40,6 +46,9 @@ writes, and [`api/rpc.js`](api/rpc.js), a read-only relay the client uses only i
 
 | Feature | What the player sees | Code |
 |---|---|---|
+| **Needs as lifetimes** | Food 8 h, rest 12 h, friends 24 h, home 3 d: the islander's mood, pose and need bars are just which entities are still alive. | [`needsOf()`](shared/tideland.js) |
+| **Batch: create + transfer in one tx** | A visitor cooks a meal and hands it over: the meal's key is predicted, created, and `changeOwnership`-ed to your islander in the same batch. | [`visit()`](shared/tideland.js) |
+| **`patchEntity`** | Older homes were patched in place to gain an islander; homes are deliberately not `readonly`. | [`scripts/bots.mjs`](scripts/bots.mjs) |
 | **Homes: `permissionlessExtension` + a 3-day cap** | Your house can only be kept alive by others; the water line on the house page is its real remaining life. | [`buildHome()`](shared/tideland.js), [`house.js`](web/src/house.js) |
 | **Batch: extension + create, atomic** | Holding "keep it afloat" seals the extension and the guestbook record together; a lost race reverts both and is retried on top. | [`tendHome()` / `keepAfloat()`](shared/tideland.js) |
 | **`$creator` as social proof** | "Kept afloat by" lists the real signers of tend records; nobody can forge a friend's save. | [`tendsQuery`](shared/tideland.js) |
