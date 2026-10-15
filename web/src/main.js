@@ -254,7 +254,7 @@ $("inspector").addEventListener("click", async (e) => {
   const name = $("f-name")?.value.trim() || MATERIALS[picked]?.label || "Land"
   const guild = $("f-guild")?.value || undefined
   const w = state.wallet.client
-  await (act === "claim" ? send("Claiming the cell", () => claimAndBuild(w, { x: sel.x, y: sel.y, name, material: picked, guild }))
+  await (act === "claim" ? send("Claiming the cell", () => claimAndBuild(w, { x: sel.x, y: sel.y, name, material: picked, guild }, pub))
     : act === "build" ? send("Building", () => build(w, { x: sel.x, y: sel.y, parcelKey: c.parcel.key, name, material: picked, guild }))
     : act === "renew" ? send("Renewing house and land", () => renew(w, { structure: c.structure, parcel: same(c.parcel?.owner, state.wallet.address) ? c.parcel : null }))
     : act === "tend" ? send("Tending the light", () => tend(w, c.structure))

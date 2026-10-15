@@ -147,6 +147,11 @@ async function tick() {
       const cell = freeCellNear(w, g.home, 7)
       if (cell) { w.cells.set(`${cell.x}:${cell.y}`, { parcel: true }); await safely(`${g.name} builds`, () => claimAndBuild(b.wallet, { x: cell.x, y: cell.y, name: pick(PLACES), material: pick(g.mats), guild: guildKeyOf(w, b.guild) })) }
     }
+    // Now and then someone pitches a camp on the Driftwood Flats and never comes back: the tide's share.
+    if (Math.random() < 0.15) {
+      const cell = freeCellNear(w, { x: 27, y: 22 }, 3)
+      if (cell) { w.cells.set(`${cell.x}:${cell.y}`, { parcel: true }); await safely("flats camp", () => claimAndBuild(b.wallet, { x: cell.x, y: cell.y, name: `${pick(PLACES)} Camp`, material: "driftwood" })) }
+    }
     if (Math.random() < 0.12) {
       const c = pick([...w.cells.values()]); if (c) await safely("inscribe", () => inscribe(b.wallet, { x: c.x, y: c.y, text: pick(LINES), span: pick(["day", "week"]) }))
     }

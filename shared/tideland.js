@@ -181,13 +181,14 @@ const structureCreate = ({ x, y, parcelKey, name, material, guild, note }) => ({
  * The structure must point at its parcel's key before that key exists, so we predict both keys from
  * the signer's nonce and pin each create to the salt that mints its predicted key.
  */
-export async function claimAndBuild(wallet, { x, y, name, material, guild }) {
+export async function claimAndBuild(wallet, { x, y, name, material, guild }, reader = publicClient()) {
   const owner = wallet.account.address
   if (!material) {
     const { createdEntities, txHash } = await wallet.executeBatch({ creates: [parcelCreate({ x, y, name, guild })] })
     return { parcelKey: createdEntities[0], txHash }
   }
-  const [p, s] = await wallet.predictEntityKeys({ owner, count: 2 })
+  // predictEntityKeys lives on the public client only (see friction.md), so the reader predicts.
+  const [p, s] = await reader.predictEntityKeys({ owner, count: 2 })
   const { createdEntities, txHash } = await wallet.executeBatch({
     creates: [
       { ...parcelCreate({ x, y, name, guild }), salt: p.salt },
