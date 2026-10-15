@@ -264,3 +264,52 @@ body.embed .house .close { display: none; }
 .diorama img.islander.pose-eating { height: 120px; }
 .diorama img.islander.pose-sad { height: 120px; }
 .holdbtn:hover:not([disabled]) { background: linear-gradient(135deg, #237a73, #31968a); }
+
+/* ---------- Islander-first layout ---------- */
+.topbar { position: fixed; top: 0; left: 0; right: 0; height: 56px; display: flex; align-items: center; justify-content: space-between;
+  padding: 0 16px; z-index: 30; background: rgba(251,252,250,.88); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+.topbar .logo { border: 0; background: none; font: 400 28px/1 "Instrument Serif", serif; padding: 0; }
+.topbar .logo em { color: var(--tide); }
+.menu { position: relative; }
+.menu-list { position: absolute; right: 0; top: 44px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow);
+  display: flex; flex-direction: column; min-width: 230px; padding: 6px; }
+.menu-list button { border: 0; text-align: left; background: none; padding: 10px 12px; font-weight: 500; }
+.menu-list button:hover { background: var(--code); }
+/* focus mode: the islander is the app; the map is a quiet backdrop */
+body.focus .brand, body.focus .tide, body.focus .inspector, body.focus .wallet, body.focus .zoom { display: none !important; }
+body.focus canvas#world { opacity: .45; filter: blur(1.5px) saturate(.8); pointer-events: none; }
+body.focus .house { left: 50%; right: auto; transform: translateX(-50%); top: 72px; width: min(480px, calc(100vw - 24px)); max-height: calc(100vh - 88px); }
+body.focus .house .close { display: none; }
+body.explore .house { display: none !important; }
+body.explore .brand { top: 72px; }
+body.explore .wallet { top: 72px; }
+body.explore .inspector { top: 224px; }
+.brand .storm-cta, .brand .cta2 { display: none; }
+/* landing */
+.landing h2 { font-size: 44px !important; }
+.landing .lead { font-size: 17px; color: var(--ink); margin: 0; }
+.landing .trio { display: flex; justify-content: center; gap: 4px; margin: 4px 0; }
+.landing .trio img { height: 120px; }
+.howto { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.howto li { display: grid; grid-template-columns: 30px 1fr; gap: 8px; align-items: center; font-size: 14px; }
+.howto li span { font-size: 20px; text-align: center; }
+.cta-big { width: 100%; padding: 16px; font-size: 18px; }
+.textlink { border: 0; background: none; color: var(--tide); text-decoration: underline; padding: 4px; font-weight: 500; }
+/* my islander */
+.callout { background: var(--tide-soft); border-radius: 14px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.callout b { font-size: 15px; } .callout p { margin: 0; font-size: 13.5px; color: var(--ink); }
+.callout.warn { background: var(--sink-soft); }
+.linkbox { display: flex; gap: 6px; } .linkbox input { font: 12px "IBM Plex Mono", monospace; }
+.acts2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.acts2 > * { padding: 14px 10px; font-size: 16px; }
+.neigh h3 { margin: 0 0 6px; }
+.neigh ol { list-style: none; margin: 0; padding: 0; }
+.neigh li { display: grid; grid-template-columns: 44px 1fr auto; gap: 10px; align-items: center; padding: 6px 0; border-top: 1px solid var(--rule); }
+.neigh li img { width: 44px; height: 44px; object-fit: contain; }
+.neigh li b { display: block; font-size: 14px; } .neigh li span { font-size: 12.5px; color: var(--sink); }
+.neigh li span.ok { color: var(--muted); }
+details.more { font-size: 13px; color: var(--muted); } details.more summary { cursor: pointer; }
+@media (max-width: 760px) { body.focus .house { top: 64px; max-height: calc(100vh - 72px); border-radius: 18px; bottom: auto; } .topbar #nav-explore { display: none; } }
+body.running canvas#world { opacity: 1 !important; filter: none !important; pointer-events: auto !important; }
+body.running .house, body.lobby .house { display: none !important; }
+body.running .topbar { display: none; }

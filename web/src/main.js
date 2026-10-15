@@ -425,8 +425,35 @@ async function ensureRunWallet({ quiet = false } = {}) {
 
 const house = createHouse({
   state, view, headNow, pub: () => pub, ensureWallet: ensureRunWallet, toast, explorer: EXPLORER, refresh, short, esc, same,
-  onOpen: () => { view.selected = null; renderInspector() },
+  onOpen: () => { view.selected = null; renderInspector(); setMode("focus") },
 })
+
+// Two modes: "focus" (the islander app, map as a quiet backdrop) and "explore" (the whole coast and its tools).
+function setMode(mode) {
+  document.body.classList.toggle("focus", mode === "focus")
+  document.body.classList.toggle("explore", mode === "explore")
+  $("nav-explore").textContent = mode === "explore" ? (house.myHome() ? "Back to my islander" : "Back") : "Explore the coast"
+  if (mode === "explore") { view.fit(); renderTide() }
+}
+document.addEventListener("click", (e) => {
+  const nav = e.target.closest("[data-nav]")?.dataset.nav
+  if (!nav) { if (!e.target.closest(".menu")) $("menu-list").hidden = true; return }
+  $("menu-list").hidden = nav !== "menu" ? true : !$("menu-list").hidden
+  if (nav === "home") { setMode("focus"); house.home() }
+  else if (nav === "explore") { if (document.body.classList.contains("explore")) { setMode("focus"); house.home() } else setMode("explore") }
+  else if (nav === "how") $("btn-how").click()
+  else if (nav === "mirror") $("btn-mirror").click()
+  else if (nav === "wallet") showWallet()
+  else if (nav === "drip") walletAction("btn-drip").then(() => setTimeout(showWallet, 3000))
+})
+async function showWallet() {
+  if (!state.wallet) { state.wallet = localWallet(); try { localStorage.setItem("tideland.mode", "local") } catch {} }
+  await updateBalance()
+  modal(`<h2>Your key</h2><p class="note">A small test key lives in this browser and signs your actions on Arkiv's Tiramisu testnet. It holds test GLM only; nothing here has real value.</p>
+    <pre>${state.wallet.address}\n${state.balance?.text ?? ""}</pre>
+    <div class="row"><button class="primary" data-nav="drip">Get test GLM</button><button class="ghost" data-legacy="${state.wallet.address}">What this key has done</button></div>`)
+}
+$("modal").addEventListener("click", (e) => { const l = e.target.closest("[data-legacy]"); if (l) { e.preventDefault(); showLegacy(l.dataset.legacy) } })
 document.addEventListener("click", (e) => { if (e.target.closest("[data-myhome]")) house.open(house.myHome()) })
 $("cta-save").onclick = () => {
   const head = headNow()
@@ -500,6 +527,8 @@ function frame(now) {
   if (q.has("embed")) { state.embed = true; document.body.classList.add("embed") }
   const hk = q.get("h") || location.pathname.match(/^\/h\/(0x[0-9a-fA-F]{64})/)?.[1]
   if (hk) house.open(hk, { push: !location.pathname.startsWith("/h/") })
+  else if (!q.has("run") && !q.has("explore")) house.home()
+  if (q.has("explore")) setMode("explore")
   if (house.myHome() && !hk) $("cta-home").outerHTML = `<button class="storm-cta" id="cta-home" data-myhome="1">Your islander <span>see how they're doing, and who came by</span></button>`
   if (q.has("run")) runner.openLobby()
   if (q.has("x") && q.has("y")) { const x = +q.get("x"), y = +q.get("y"); select({ x, y }); view.focus(x, y) }

@@ -10,8 +10,24 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Albert+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap" />
 </head>
-<body>
+<body class="focus">
   <canvas id="world" aria-label="The Tideland coast"></canvas>
+
+  <nav class="topbar">
+    <button class="logo" data-nav="home">Tide<em>land</em></button>
+    <div class="row">
+      <button class="ghost" data-nav="explore" id="nav-explore">Explore the coast</button>
+      <div class="menu">
+        <button class="ghost" data-nav="menu" aria-label="More">⋯</button>
+        <div class="menu-list" id="menu-list" hidden>
+          <button data-nav="how">How it works</button>
+          <button data-nav="mirror">Read it without this site</button>
+          <button data-run="lobby">Storm shift (mini-game)</button>
+          <button data-nav="wallet">Your key &amp; test GLM</button>
+        </div>
+      </div>
+    </div>
+  </nav>
 
   <header class="brand card">
     <div class="eyebrow">Arkiv · Tiramisu · world s1</div>
