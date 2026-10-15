@@ -1,10 +1,15 @@
 # Tideland
 
+**Your house sinks unless someone keeps it afloat.** Build a house on the coast; it starts with 12 hours and can never
+hold more than 3 days, and only *other people* can keep it alive. Share the link; a friend opens it, holds a button,
+and watches the water drain. Releasing seals one atomic Arkiv transaction that extends your house **and** writes their
+signed line in its guestbook. Your house lives exactly as long as somebody cares.
+
 **A shared world the tide is always taking back.** Every house, parcel, inscription and guild charter on this coast is an
 [Arkiv](https://arkiv.network) entity with an expiry. Nothing deletes them. When nobody tends something, its expiry passes and it
 drops out of every query: it sinks. Decay is not game code a studio can patch. It is the database.
 
-- **Play:** https://tideland.nerom.site, then press **Start a storm shift**
+- **Play:** https://tideland.nerom.site: **Build your house**, or **Save a sinking house**. Share links look like `https://tideland.nerom.site/h/<house key>` and unfurl on X as a playable card.
 - **Keeper Run:** 90 seconds in a storm. Buoys, jetties, sea walls and lighthouses are *commons*: created with
   `permissionlessExtension`, owned by nobody's upkeep. Run between them and hold to patch before they sink. Every patch
   is a real Lifetime Extension, sealed every few seconds in one atomic batch from your own key. Your run becomes a
@@ -35,6 +40,9 @@ writes, and [`api/rpc.js`](api/rpc.js), a read-only relay the client uses only i
 
 | Feature | What the player sees | Code |
 |---|---|---|
+| **Homes: `permissionlessExtension` + a 3-day cap** | Your house can only be kept alive by others; the water line on the house page is its real remaining life. | [`buildHome()`](shared/tideland.js), [`house.js`](web/src/house.js) |
+| **Batch: extension + create, atomic** | Holding "keep it afloat" seals the extension and the guestbook record together; a lost race reverts both and is retried on top. | [`tendHome()` / `keepAfloat()`](shared/tideland.js) |
+| **`$creator` as social proof** | "Kept afloat by" lists the real signers of tend records; nobody can forge a friend's save. | [`tendsQuery`](shared/tideland.js) |
 | **Entity Expiration per type** | Material is lifetime: driftwood 6 h, pine 7 d, stone 90 d, monument 5 y, lighthouse 3 d. Houses weather, flood and sink as their expiry nears. | [`MATERIALS`](shared/tideland.js) |
 | **Lifetime Extension** | "Renew" buys the full span again from now. Upkeep is the core loop. | [`renew()`](shared/tideland.js) |
 | **Creation flag: `permissionlessExtension`** | The whole Keeper Run: buoys, jetties, sea walls and lighthouses are commons anyone can patch without owning them. The inspector shows who tended one last. | [`sealPatches()`](shared/tideland.js), [`run.js`](web/src/run.js) |

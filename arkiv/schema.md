@@ -14,11 +14,38 @@ draws the same world. Our web client is one implementation; [`cli/tide.mjs`](../
 |---|---|---|---|
 | `app` | `str` | `"tideland"` | Namespace filter, every query starts with it |
 | `world` | `str` | `"s1"` (season) | A new season is a new world without touching old data |
-| `kind` | `str` | `parcel` · `structure` · `inscription` · `guild` · `run` | Type filter |
+| `kind` | `str` | `home` · `tend` · `parcel` · `structure` · `inscription` · `guild` · `run` | Type filter |
 
 Coordinates are **numbers** so regions are range queries: `x` and `y` are `i32` in `0..31`.
 
 ## Entity types
+
+### `home` — your house (the heart of the game)
+
+| | |
+|---|---|
+| Attributes | `app`, `world`, `kind="home"`, `x i32`, `y i32`, `style str` (`pine` · `stone` · `driftwood`) |
+| Payload (JSON) | `{ "name": "Saltbreak Cottage" }` (players are asked not to use real names) |
+| Lifetime | starts at **12 hours**; can never hold more than **3 days** from now |
+| Flags | `permissionlessExtension`: anyone can keep it afloat; nobody else can change it |
+| `$creator` / `$owner` | the builder |
+
+The client never lets you tend your own home: only other people can keep it alive, so a home lives exactly as long
+as somebody cares about it.
+
+### `tend` — one save, a line in the guestbook
+
+| | |
+|---|---|
+| Attributes | `app`, `world`, `kind="tend"`, `home key` (the home), `minutes i32` (life bought) |
+| Payload (JSON) | `{ "note": "Held the line for you!" }` (max 80 chars, optional) |
+| Lifetime | 30 days |
+| Flags | `readonly` |
+| `$creator` | the person who saved it: "kept afloat by" is a list of verifiable authors |
+
+**A save is one atomic batch:** `executeBatch({ extensions: [home → atBlock(target)], creates: [tend] })`. If
+somebody else extended the home first, our target would shorten its life, the engine reverts the whole batch (no false
+guestbook line), and the client re-reads the home's expiry and stacks the save on top, once.
 
 ### `parcel` — a land claim
 
@@ -115,6 +142,9 @@ All expressed with the SDK query builder (`@arkiv-network/sdk/query`). `NOW` is 
 | A guild's standing footprint | `app = 'tideland' AND kind = 'structure' AND guild = key(guildKey)` |
 | Lighthouses going dark | `app = 'tideland' AND material = 'lighthouse' AND $expiresAt < u64(NOW + 7200)` |
 | The commons (run targets) | `app = 'tideland' AND world = 's1' AND kind = 'structure' AND (material = 'lighthouse' OR material = 'buoy' OR material = 'jetty' OR material = 'seawall')` |
+| A house's guestbook | `app = 'tideland' AND world = 's1' AND kind = 'tend' AND home = key(<home>)` |
+| Everyone a player has saved | `kind = 'tend'` + `createdBy(address)` |
+| Houses sinking now ("Save a sinking house") | `kind = 'home'`, sorted by `$expiresAt` client-side; also in the tide map query |
 | Keepers remembered (leaderboard) | `app = 'tideland' AND world = 's1' AND kind = 'run'`, sorted by `score` client-side (no server ordering) |
 
 Every query is paged with the SDK cursor (`hasNextPage()` / `next()`, max 200 per page). There is no server-side
