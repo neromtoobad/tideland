@@ -1,0 +1,22 @@
+{
+  "name": "tideland",
+  "version": "1.0.0",
+  "description": "A shared world the tide is always taking back. Built on Arkiv.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "art": "node scripts/art.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "@arkiv-network/sdk": "^0.8.1",
+    "viem": "^2.57.7"
+  },
+  "devDependencies": {
+    "sharp": "^0.35.5",
+    "vite": "^8.3.4"
+  }
+}

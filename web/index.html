@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Tideland</title>
+  <meta name="description" content="A shared world the tide is always taking back. Every house is an Arkiv entity; whatever nobody tends sinks." />
+  <link rel="icon" href="/sprites/lighthouse.webp" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Albert+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap" />
+</head>
+<body>
+  <canvas id="world" aria-label="The Tideland coast"></canvas>
+
+  <header class="brand card">
+    <div class="eyebrow">Arkiv · Tiramisu · world s1</div>
+    <h1>Tide<em>land</em></h1>
+    <p class="tagline">A world the tide is always taking back.</p>
+    <div class="stats">
+      <span><b id="stat-live">–</b> standing</span>
+      <span><b id="stat-tide" class="sink">–</b> sink within 24 h</span>
+      <span class="mono">block <b id="stat-block">–</b></span>
+      <span class="sink small" id="stat-relay" hidden title="Your network's anonymous Arkiv read budget is used up, so reads go through our read-only relay.">via relay</span>
+    </div>
+    <div class="row">
+      <button class="ghost" id="btn-how">How it works</button>
+      <button class="ghost" id="btn-mirror">Read it without us</button>
+    </div>
+  </header>
+
+  <section class="wallet card" id="wallet">
+    <div class="who">
+      <span class="dot" id="wallet-dot"></span>
+      <span class="mono" id="wallet-addr">no wallet</span>
+    </div>
+    <div class="mono small" id="wallet-bal">–</div>
+    <div class="row" id="wallet-actions"></div>
+  </section>
+
+  <aside class="tide card" id="tide">
+    <div class="phead">
+      <h2>The tide map</h2>
+      <span class="eyebrow">sinks next</span>
+    </div>
+    <p class="hint mono" id="tide-query"></p>
+    <ol id="tide-list"></ol>
+  </aside>
+
+  <aside class="inspector card" id="inspector" hidden></aside>
+
+  <div class="zoom">
+    <button id="zoom-in" aria-label="Zoom in">+</button>
+    <button id="zoom-out" aria-label="Zoom out">−</button>
+    <button id="zoom-fit" aria-label="Fit the coast">⤢</button>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <dialog id="modal"><div id="modal-body"></div><form method="dialog"><button class="primary">Close</button></form></dialog>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
