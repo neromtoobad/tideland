@@ -81,6 +81,10 @@ export function createRun(deps) {
     run.holding = false
     sfx.storm(false); sfx.end()
     $("run-hud").querySelector(".timer").textContent = "0:00"
+    document.body.classList.remove("running")
+    $("run-result").hidden = false
+    $("run-result-body").innerHTML = `<div class="eyebrow">Shift over</div><h2>${Math.round(run.score).toLocaleString()} <small>points</small></h2>
+      <p class="note"><span class="pulse">Sealing your last patches and recording the run on Arkiv…</span> (a few blocks)</p>`
     // seal whatever is left, then record the run itself
     await flush(true)
     while (run.inflight) await run.inflight.catch(() => {})
