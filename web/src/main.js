@@ -53,7 +53,7 @@ function rebuild() {
   $("stat-live").textContent = standing
   $("stat-tide").textContent = state.tide.filter((t) => t.expiresAt > headNow()).length
   renderTide()
-  if (view.selected) renderInspector()
+  if (view.selected) renderInspector({ soft: true })
 }
 
 const headNow = () => state.head + BigInt(Math.floor((Date.now() - state.headAt) / 2000))
@@ -154,8 +154,18 @@ function lifeBlock(t) {
 
 const who = (addr) => `<a href="#" data-legacy="${addr}">${short(addr)}</a>${same(addr, state.wallet?.address) ? " <span class='badge'>you</span>" : ""}`
 
-function renderInspector() {
+let lastSig = ""
+function renderInspector({ soft = false } = {}) {
   const el = $("inspector"), sel = view.selected
+  if (soft && sel) {
+    // Background refreshes must not wipe a half-typed name: skip while the player is using the form,
+    // and skip when nothing on this cell changed.
+    if (el.contains(document.activeElement) && document.activeElement !== document.body) return
+    const c0 = state.cells.get(`${sel.x}:${sel.y}`)
+    const sig = JSON.stringify([c0?.parcels, c0?.structures, c0?.inscriptions, state.wallet?.address, state.balance?.text, [...state.tenders]], (k, v) => (typeof v === "bigint" ? v.toString() : v))
+    if (sig === lastSig) return
+  }
+  document.body.classList.toggle("inspecting", !!sel)
   if (!sel) { el.hidden = true; return }
   el.hidden = false
   const c = state.cells.get(`${sel.x}:${sel.y}`) ?? { x: sel.x, y: sel.y, parcels: [], structures: [], inscriptions: [], contested: [], squatters: [] }
@@ -192,10 +202,14 @@ function renderInspector() {
 
   // ----- actions -----
   if (!state.wallet) {
-    html += `<div class="section"><p class="note">Connect a wallet (top right) to claim, build and tend.</p></div>`
-  } else if (!p) {
+    html += `<div class="section"><p class="note">Pick a wallet to claim, build and tend. A local key lives only in this browser and holds test GLM.</p>
+      <div class="row"><button class="primary" data-act="btn-local">Play with a local key</button><button class="ghost" data-act="btn-inj">Use my wallet</button></div></div>`
+  } else {
+    html += `<div class="mine"><span class="mono small">you · ${short(state.wallet.address)} · ${state.balance?.text ?? "…"}</span>${state.balance && state.balance.wei < 2_000_000_000_000_000n ? `<button class="ghost" data-act="btn-drip">Get test GLM</button>` : ""}</div>`
+  }
+  if (state.wallet && !p) {
     html += claimForm()
-  } else if (same(p.owner, me) && !s) {
+  } else if (state.wallet && same(p.owner, me) && !s) {
     html += buildForm()
   }
   if (state.wallet && s) {
@@ -218,6 +232,8 @@ function renderInspector() {
     <div class="row"><select id="ins-span" style="flex:1">${Object.keys(INSCRIPTION_SPANS).map((k) => `<option value="${k}" ${k === "week" ? "selected" : ""}>remember for a ${k}</option>`).join("")}</select>
     <button data-act="inscribe">Carve</button></div></div>`
   el.innerHTML = html
+  const c1 = state.cells.get(`${sel.x}:${sel.y}`)
+  lastSig = JSON.stringify([c1?.parcels, c1?.structures, c1?.inscriptions, state.wallet?.address, state.balance?.text, [...state.tenders]], (k, v) => (typeof v === "bigint" ? v.toString() : v))
 }
 
 function materialPicker() {
@@ -248,6 +264,7 @@ $("inspector").addEventListener("click", async (e) => {
   const act = e.target.closest("[data-act]")?.dataset.act
   if (!act) return
   if (act === "close") return select(null)
+  if (act.startsWith("btn-")) return walletAction(act)
   const sel = view.selected, c = state.cells.get(`${sel.x}:${sel.y}`)
   const picked = $("inspector").querySelector('[data-mat][aria-pressed="true"]')?.dataset.mat
   const name = $("f-name")?.value.trim() || MATERIALS[picked]?.label || "Land"
@@ -270,7 +287,11 @@ async function send(label, fn) {
     const r = await fn()
     const hash = r?.txHash
     toast(`${label}: done. ${hash ? `<a href="${EXPLORER}/tx/${hash}" target="_blank" rel="noopener">view transaction</a>` : ""}`, 7000)
+    // arkiv_query trails the receipt by a few seconds (see friction.md), so read twice.
+    await new Promise((r) => setTimeout(r, 2000))
     await refresh(); await updateBalance()
+    setTimeout(() => refresh().then(() => renderInspector()).catch(() => {}), 8000)
+    document.activeElement?.blur?.(); renderInspector()
   } catch (err) {
     console.error(err)
     toast(`${label} failed: ${esc(err.shortMessage || err.message).slice(0, 220)}`, 9000)
@@ -313,9 +334,11 @@ function renderWallet() {
     ? `<button class="primary" id="btn-drip">Get test GLM</button><button class="ghost" id="btn-switch">${w.kind === "local" ? "Use my wallet" : "Use local key"}</button>`
     : `<button class="primary" id="btn-local">Play with a local key</button><button class="ghost" id="btn-inj">Use my wallet</button>`
 }
-$("wallet").addEventListener("click", async (e) => {
+$("wallet").addEventListener("click", (e) => {
   const leg = e.target.closest("[data-legacy]"); if (leg) { e.preventDefault(); return showLegacy(leg.dataset.legacy) }
-  const id = e.target.id
+  if (e.target.id) walletAction(e.target.id)
+})
+async function walletAction(id) {
   try {
     if (id === "btn-local" || (id === "btn-switch" && state.wallet?.kind === "injected")) state.wallet = localWallet()
     else if (id === "btn-inj" || id === "btn-switch") state.wallet = await injectedWallet()
@@ -323,12 +346,12 @@ $("wallet").addEventListener("click", async (e) => {
       toast("Asking the coast treasury for test GLM…", 0)
       const r = await drip(state.wallet.address)
       toast(`Sent ${r.amount} GLM. <a href="${EXPLORER}/tx/${r.txHash}" target="_blank" rel="noopener">view transfer</a>`, 6000)
-      setTimeout(updateBalance, 2500)
+      setTimeout(() => updateBalance().then(renderInspector), 2500)
     } else return
     try { localStorage.setItem("tideland.mode", state.wallet.kind) } catch {}
-    renderWallet(); updateBalance(); renderInspector()
+    renderWallet(); await updateBalance(); renderInspector()
   } catch (err) { toast(esc(err.message), 7000) }
-})
+}
 
 // ---------------- modals ----------------
 

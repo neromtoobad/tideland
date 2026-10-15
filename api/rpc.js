@@ -3,7 +3,8 @@
 // public RPC directly first. Writes cannot pass: only the read methods below are forwarded.
 const UPSTREAM = "https://rpc.tiramisu.db-chain.testnet.arkiv.network"
 const READS = new Set(["arkiv_query", "arkiv_getBlockTiming", "arkiv_getEntityCount", "eth_chainId", "eth_blockNumber",
-  "eth_getBalance", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getBlockByNumber"])
+  "eth_getBalance", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getBlockByNumber", "eth_call",
+  "eth_getTransactionCount", "eth_gasPrice", "eth_maxPriorityFeePerGas", "eth_feeHistory", "eth_estimateGas"])
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" })

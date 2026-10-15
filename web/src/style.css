@@ -80,6 +80,9 @@ button.ghost { background: transparent; }
 
 /* inspector */
 .inspector { right: 16px; top: 168px; width: 330px; max-height: calc(100vh - 184px); overflow: auto; display: flex; flex-direction: column; gap: 12px; }
+.mine { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: var(--code); border-radius: 10px; padding: 6px 10px; }
+.mine button { padding: 4px 8px; font-size: 12px; }
+.inspector > * { flex-shrink: 0; }
 .inspector .close { position: absolute; right: 10px; top: 8px; border: 0; background: transparent; font-size: 20px; padding: 2px 8px; }
 .inspector h2 { font: 400 28px/1.1 "Instrument Serif", serif; margin: 0; padding-right: 24px; }
 .inspector .coord { font: 600 11px "IBM Plex Mono", monospace; color: var(--muted); }
@@ -136,5 +139,6 @@ dialog form { margin-top: 14px; text-align: right; }
   .wallet { top: auto; bottom: 16px; right: 16px; left: 16px; width: auto; }
   .tide { display: none; }
   .inspector { left: 16px; right: 16px; width: auto; top: auto; bottom: 16px; max-height: 60vh; }
+  body.inspecting .wallet, body.inspecting .zoom { display: none; }
   .zoom { bottom: auto; top: 50%; }
 }
