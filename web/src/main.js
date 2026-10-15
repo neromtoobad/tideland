@@ -74,15 +74,14 @@ async function refreshNow() {
   rebuild()
 }
 
-async function refreshOne(key) {
-  try { state.things.set(key, toThing(await reading(() => pub.getEntity(key)))) } catch { state.things.delete(key) }
-  rebuild()
-}
 
 function watchLive() {
   // A real socket: WebSocket transport and no fromBlock, so events are pushed rather than polled.
   const ws = publicClient({ ws: true })
-  const touch = (e) => { if (e.entityKey) refreshOne(e.entityKey) }
+  // Each arkiv_query costs 100 units of the visitor's budget, so a burst of events triggers ONE
+  // debounced re-read of the world (2 queries) instead of one getEntity per event.
+  let pending = null
+  const touch = () => { clearTimeout(pending); pending = setTimeout(() => refresh().catch(() => {}), 2500) }
   ws.watchEntityEvents({
     onEntityCreated: touch,
     onExpiryExtended: async (e) => {
@@ -96,7 +95,7 @@ function watchLive() {
       } catch { ripple(e.entityKey, "renewed") }
     },
     onOwnershipTransferred: touch, onEntityPatched: touch,
-    onEntityDeleted: (e) => { state.things.delete(e.entityKey); rebuild() },
+    onEntityDeleted: (e) => { state.things.delete(e.entityKey); rebuild(); touch() },
     onError: (err) => console.warn("watch", err.message),
   })
 }
@@ -401,9 +400,10 @@ function frame() { draw(view, { cells: state.cells, guilds: state.guilds, head: 
   renderWallet(); updateBalance()
   try { await refresh() } catch (err) { toast(`Could not reach Arkiv: ${esc(err.message)}`, 0) }
   try { watchLive() } catch (err) { console.warn(err) }
-  // Live changes arrive on the socket; a full re-read every 2 minutes only catches what expiry removed.
-  setInterval(() => refresh().catch(() => {}), 120000)
-  setInterval(() => renderTide(), 10000)
+  // Live changes arrive on the socket; a slow background re-read is only a safety net. Expiry needs no
+  // re-read at all: every frame compares each entity's $expiresAt with the estimated head block.
+  setInterval(() => refresh().catch(() => {}), 300000)
+  setInterval(() => rebuild(), 10000) // local only: notices what the tide just took
   setInterval(() => updateBalance(), 30000)
   const q = new URLSearchParams(location.search)
   if (q.has("x") && q.has("y")) { const x = +q.get("x"), y = +q.get("y"); select({ x, y }); view.focus(x, y) }

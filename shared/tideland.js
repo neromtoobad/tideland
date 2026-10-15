@@ -35,7 +35,7 @@ const envKey = () => globalThis.process?.env?.ARKIV_ACCESS_KEY || undefined
  * (ANON_COST_LIMITED), and viem's default retry-with-backoff turns that into a silent ~40 s hang.
  */
 function transport({ rpc = RPC_URL, apiKey = envKey() } = {}) {
-  return http(rpc, { retryCount: 1, timeout: 20_000, fetchOptions: apiKey ? { headers: { "X-API-KEY": apiKey } } : undefined })
+  return http(rpc, { retryCount: 0, timeout: 20_000, fetchOptions: apiKey ? { headers: { "X-API-KEY": apiKey } } : undefined })
 }
 
 export function publicClient({ ws = false, rpc, apiKey } = {}) {
@@ -46,7 +46,13 @@ export function walletClient(account, opts) {
   return createWalletClient({ chain: tiramisu, transport: transport(opts), account })
 }
 
-export const isBudgetError = (e) => e?.status === 429 || /ANON_COST_LIMITED|429/.test(String(e?.details ?? e?.message ?? ""))
+/** True when the node refused for budget (HTTP 429). viem nests the HTTP error under one or more `cause`s. */
+export function isBudgetError(e) {
+  for (let cur = e, depth = 0; cur && depth < 8; cur = cur.cause, depth++) {
+    if (cur.status === 429 || /ANON_COST_LIMITED|Status: 429|status 429/i.test(`${cur.details ?? ""} ${cur.message ?? ""}`)) return true
+  }
+  return false
+}
 
 const base = (kind) => [eq("app", APP), eq("world", WORLD), eq("kind", kind)]
 const common = (kind) => ({ app: APP, world: WORLD, kind })
