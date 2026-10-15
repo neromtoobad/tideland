@@ -14,7 +14,7 @@ draws the same world. Our web client is one implementation; [`cli/tide.mjs`](../
 |---|---|---|---|
 | `app` | `str` | `"tideland"` | Namespace filter, every query starts with it |
 | `world` | `str` | `"s1"` (season) | A new season is a new world without touching old data |
-| `kind` | `str` | `parcel` · `structure` · `inscription` · `guild` | Type filter |
+| `kind` | `str` | `parcel` · `structure` · `inscription` · `guild` · `run` | Type filter |
 
 Coordinates are **numbers** so regions are range queries: `x` and `y` are `i32` in `0..31`.
 
@@ -43,6 +43,14 @@ unrenewed by convention. A cell is claimable again only when every parcel on it 
 | `stone` | 90 days | none | owner |
 | `monument` | 5 years | `readonly` | owner (its words can never be edited) |
 | `lighthouse` | 3 days | `permissionlessExtension` | **anyone** (a commons the whole coast keeps lit) |
+| `driftwood` | 6 hours | none | owner |
+| `buoy` | 2 hours | `permissionlessExtension` | **anyone** (harbour commons) |
+| `jetty` | 12 hours | `permissionlessExtension` | **anyone** |
+| `seawall` | 1 day | `permissionlessExtension` | **anyone** |
+
+The lifetime is the **most** a structure can hold: a build or renewal buys the full span from now, and a patch can
+never push a commons past its full span from now. The Harbour Trust bot sets commons adrift already worn (15–100%
+of their span), with no `parcel` attribute; commons stand on open coast and are never owned by anyone who maintains them.
 
 | | |
 |---|---|
@@ -62,6 +70,21 @@ alive on land that has lapsed.
 | Payload (JSON) | `{ "text": "..." }` (max 140 chars, synthetic content only) |
 | Lifetime | chosen by the writer: 1 day, 1 week, 1 month or 1 year. You pay for exactly how long you want to be remembered. |
 | Flags | `readonly`: an inscription can never be edited, only allowed to fade. |
+
+### `run` — one Keeper Run (a 90-second storm shift)
+
+| | |
+|---|---|
+| Attributes | `app`, `world`, `kind="run"`, `score i32`, `saved i32` (minutes of life sealed), `patches i32`, `keeper str` |
+| Payload (JSON) | `{ "batches": 3, "maxCombo": 6, "txs": ["0x…"] }`: the patch transactions, so a run can be audited |
+| Lifetime | **12 s per point**, between 1 hour and 30 days. Better runs are remembered longer: the leaderboard decays too. |
+| Flags | `readonly` |
+| `$creator` | the keeper. The board names keepers by their address. |
+
+**Patching (what a run writes).** Each patch tick buys a commons 2.5% of its span. Patches are applied on screen at
+once and sealed every ~2.5 s as **one `executeBatch` of `extensions`**, each with an absolute
+`ExpirationTime.atBlock(target)`. Targets are computed from the freshest known expiry, which the client keeps current
+from `ExpiryExtended` events (they carry the new `expiresAt`), so a batch only ever moves expiries later.
 
 ### `guild` — a charter
 
@@ -91,6 +114,8 @@ All expressed with the SDK query builder (`@arkiv-network/sdk/query`). `NOW` is 
 | A holder's estate | `app = 'tideland' AND kind = 'parcel'` + `ownedBy(address)` |
 | A guild's standing footprint | `app = 'tideland' AND kind = 'structure' AND guild = key(guildKey)` |
 | Lighthouses going dark | `app = 'tideland' AND material = 'lighthouse' AND $expiresAt < u64(NOW + 7200)` |
+| The commons (run targets) | `app = 'tideland' AND world = 's1' AND kind = 'structure' AND (material = 'lighthouse' OR material = 'buoy' OR material = 'jetty' OR material = 'seawall')` |
+| Keepers remembered (leaderboard) | `app = 'tideland' AND world = 's1' AND kind = 'run'`, sorted by `score` client-side (no server ordering) |
 
 Every query is paged with the SDK cursor (`hasNextPage()` / `next()`, max 200 per page). There is no server-side
 ordering, so clients sort by `$createdAt` / `$expiresAt` locally.

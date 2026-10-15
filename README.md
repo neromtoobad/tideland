@@ -4,7 +4,11 @@
 [Arkiv](https://arkiv.network) entity with an expiry. Nothing deletes them. When nobody tends something, its expiry passes and it
 drops out of every query: it sinks. Decay is not game code a studio can patch. It is the database.
 
-- **Play:** https://tideland.nerom.site
+- **Play:** https://tideland.nerom.site, then press **Start a storm shift**
+- **Keeper Run:** 90 seconds in a storm. Buoys, jetties, sea walls and lighthouses are *commons*: created with
+  `permissionlessExtension`, owned by nobody's upkeep. Run between them and hold to patch before they sink. Every patch
+  is a real Lifetime Extension, sealed every few seconds in one atomic batch from your own key. Your run becomes a
+  read-only entity that is remembered longer the better you played.
 - **Data contract:** [`arkiv/schema.md`](arkiv/schema.md) · **Friction report:** [`arkiv/friction.md`](arkiv/friction.md)
 - **Network:** Arkiv Tiramisu testnet (chain `7738577`), `@arkiv-network/sdk` 0.8.1
 - **Tracks:** Censorship Resistance · Open Source
@@ -33,7 +37,9 @@ writes, and [`api/rpc.js`](api/rpc.js), a read-only relay the client uses only i
 |---|---|---|
 | **Entity Expiration per type** | Material is lifetime: driftwood 6 h, pine 7 d, stone 90 d, monument 5 y, lighthouse 3 d. Houses weather, flood and sink as their expiry nears. | [`MATERIALS`](shared/tideland.js) |
 | **Lifetime Extension** | "Renew" buys the full span again from now. Upkeep is the core loop. | [`renew()`](shared/tideland.js) |
-| **Creation flag: `permissionlessExtension`** | Lighthouses are commons: anyone can tend them without owning them. The inspector shows who tended it last. | [`tend()`](shared/tideland.js) |
+| **Creation flag: `permissionlessExtension`** | The whole Keeper Run: buoys, jetties, sea walls and lighthouses are commons anyone can patch without owning them. The inspector shows who tended one last. | [`sealPatches()`](shared/tideland.js), [`run.js`](web/src/run.js) |
+| **Batch of extensions, absolute targets** | A run seals its patches every few seconds as one `executeBatch` of `ExpirationTime.atBlock(...)` extensions: all or nothing. | [`sealPatches()`](shared/tideland.js) |
+| **Lifetime as a score** | A finished run is a read-only entity whose lifetime is 12 s per point: the leaderboard decays like the coast. | [`recordRun()`](shared/tideland.js) |
 | **Creation flag: `readonly`** | Monuments and inscriptions can never be edited, only allowed to fade. | [`MATERIALS.monument`](shared/tideland.js), [`inscribe()`](shared/tideland.js) |
 | **`$creator` vs `$owner`** | "Built by" (forever) vs "Held by" (land can be handed on). Click any address for its legacy (`createdBy`) and estate (`ownedBy`). | [`legacyQuery`/`estateQuery`](shared/tideland.js) |
 | **Batch + predicted keys** | Claiming land and building on it is one atomic transaction. The house references its parcel's key before that key exists. | [`claimAndBuild()`](shared/tideland.js) |
@@ -59,11 +65,15 @@ The exact query behind the tide map:
 app = str('tideland') AND world = str('s1') AND $expiresAt < u64(<head + 43200>)
 ```
 
-**2. Play:** open https://tideland.nerom.site, press **Play with a local key**, then **Get test GLM**. Click an open cell, name it,
+**2. Play a Keeper Run:** open https://tideland.nerom.site and press **Start a storm shift**, pick a keeper, start.
+Your browser makes a local test key and tops it up with test GLM automatically. Click a commons with a red ring to run
+there and hold to patch. Watch the HUD's batch counter and "last tx" link: each one is an `executeBatch` on Tiramisu.
+
+**3. Build:** press **Play with a local key**, then **Get test GLM**. Click an open cell, name it,
 pick a material and **Claim this cell**: a parcel and a house are created in one batch. Find a lighthouse you don't own and
 **Tend the light**. Click any address to see what it built and what it holds.
 
-**3. Run the web client locally:** `npm run dev` → http://localhost:5174
+**4. Run the web client locally:** `npm run dev` → http://localhost:5174
 
 ## On-chain evidence (Tiramisu)
 
@@ -75,6 +85,7 @@ Wallets that create Tideland entities:
 | Tidewrights founder / villagers | `0x498307005DEe719Fb85Cb9A891bae8242d89c172` · `0x79F2A53cC10eBf38Bc3E889a0E8a2B1F3f5860F4` · `0x9C8f66a029e86e84A134EC0481F9eDDcf9806e20` |
 | Granite Hands founder / villagers | `0xD321C6F69862Bb9273Ec55AfDD93Df43dEDA3157` · `0x1180F5ed4E3B5BbBbAeb1F67e34EC4C60c92c70B` · `0x455bDa4E6a28342763946f3688204a44Be1EE4BC` |
 | Lamplighters founder / villagers | `0x6f5cB8FC63047Bce8Cc6C8c0ab0B2B0651BB3648` · `0x6B4744C8f41245072cA0DF98d32c34c36a2485bc` · `0x9b667162F892Cc7A7113CD00f736D03819982BED` |
+| Harbour Trust (places the commons, never maintains them) | `0x643A28f7E81f398EC0a8Bc7460aAE1abc9A1721E` |
 | Players | any address: each player signs with their own key |
 
 Sample transactions (explorer):
