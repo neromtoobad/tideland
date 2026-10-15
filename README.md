@@ -77,6 +77,11 @@ Wallets that create Tideland entities:
 | Lamplighters founder / villagers | `0x6f5cB8FC63047Bce8Cc6C8c0ab0B2B0651BB3648` · `0x6B4744C8f41245072cA0DF98d32c34c36a2485bc` · `0x9b667162F892Cc7A7113CD00f736D03819982BED` |
 | Players | any address: each player signs with their own key |
 
+Sample transactions (explorer):
+- First entity, the Tidewrights charter: [`0x3d1dd5ff…`](https://tiramisu.explorer.arkiv.network/tx/0x3d1dd5ff68f957c22762663d75bb8352017d1dacd82135d83ee9b1044ebb0c2d)
+- Claim + build in one batch (parcel and pine house, house references the predicted parcel key): [`0x3dc2cdaa…`](https://tiramisu.explorer.arkiv.network/tx/0x3dc2cdaabcf0a9da0953790fc58177dbb68c0258c2c4b665aba3ac7357b74d9b)
+- Bots playing in public CI: [guilds workflow runs](https://github.com/neromtoobad/tideland/actions/workflows/bots.yml)
+
 The guild bots are ordinary players with their own wallets. They run every 20 minutes in public CI
 ([`.github/workflows/bots.yml`](.github/workflows/bots.yml), [`scripts/bots.mjs`](scripts/bots.mjs)): they renew most of
 their houses, forget some, keep every lighthouse lit, and leave the Driftwood Flats to the tide.
