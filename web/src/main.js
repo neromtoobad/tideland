@@ -1,7 +1,7 @@
 import "./style.css"
 import {
   MATERIALS, INSCRIPTION_SPANS, DAY_BLOCKS, publicClient, collect, worldQuery, tideQuery, legacyQuery, estateQuery,
-  guildsQuery, toThing, layout, isBudgetError, lifeLeft, blocksToText, claimAndBuild, build, renew, tend, inscribe, sell,
+  guildsQuery, toThing, layout, isBudgetError, needsOf, lifeLeft, blocksToText, claimAndBuild, build, renew, tend, inscribe, sell,
 } from "../../shared/tideland.js"
 import { createView, draw, loadSprites, spriteUrl, characterFor } from "./render.js"
 import { localWallet, injectedWallet, balanceOf, drip } from "./wallet.js"
@@ -51,13 +51,19 @@ function rebuild() {
   const all = [...state.things.values()].filter((t) => t.expiresAt > head)
   state.cells = layout(all)
   state.guilds = new Map(all.filter((t) => t.kind === "guild").map((g) => [g.key, g]))
+  // each islander's mood, from the live need entities pointing at its home
+  const byHome = new Map()
+  for (const t of all) if (t.home) (byHome.get(t.home) ?? byHome.set(t.home, []).get(t.home)).push(t)
+  state.moods = new Map(all.filter((t) => t.kind === "home").map((h) => [h.key, needsOf(h, byHome.get(h.key) ?? [], head).mood]))
   const standing = all.filter((t) => t.kind === "structure").length
   $("stat-live").textContent = standing
-  $("stat-tide").textContent = state.tide.filter((t) => t.expiresAt > headNow() && t.kind !== "run").length
+  $("stat-tide").textContent = state.tide.filter((t) => t.expiresAt > headNow() && WORLDLY.has(t.kind)).length
   renderTide()
   if (view.selected) renderInspector({ soft: true })
 }
 
+// things that stand on the map (needs, saves and runs are about islanders, not places)
+const WORLDLY = new Set(["home", "structure", "parcel", "inscription", "guild"])
 const headNow = () => state.head + BigInt(Math.floor((Date.now() - state.headAt) / 2000))
 
 const refresh = () => reading(refreshNow)
@@ -88,7 +94,7 @@ function watchLive() {
     clearTimeout(pending); pending = setTimeout(() => refresh().catch(() => {}), 2500)
   }
   ws.watchEntityEvents({
-    onEntityCreated: touch,
+    onEntityCreated: (e) => { touch(e); house.onCreated() },
     onExpiryExtended: async (e) => {
       runner.onExtended(e.entityKey, e.expiresAt) // the event carries the new expiry: apply it directly
       touch(e)
@@ -101,7 +107,7 @@ function watchLive() {
         ripple(e.entityKey, same(tx.from, t?.owner) ? "renewed by its holder" : `tended by ${short(tx.from)}`)
       } catch { ripple(e.entityKey, "renewed") }
     },
-    onOwnershipTransferred: touch, onEntityPatched: touch,
+    onOwnershipTransferred: (e) => { touch(e); house.onCreated() }, onEntityPatched: touch,
     onEntityDeleted: (e) => { state.things.delete(e.entityKey); rebuild(); touch() },
     onError: (err) => console.warn("watch", err.message),
   })
@@ -134,7 +140,7 @@ function thingSprite(t) {
 function renderTide() {
   $("tide-query").textContent = state.lastQuery
   const head = headNow()
-  const items = state.tide.filter((t) => t.expiresAt > head && t.kind !== "run").slice(0, 40)
+  const items = state.tide.filter((t) => t.expiresAt > head && WORLDLY.has(t.kind)).slice(0, 40)
   $("tide-list").innerHTML = items.length ? items.map((t) => `
     <li data-key="${t.key}" class="${t.expiresAt - head > 21600n ? "calm" : ""}">
       <img src="${thingSprite(t)}" alt="" />
@@ -472,7 +478,7 @@ let last = performance.now()
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now
   runner.update(dt)
-  draw(view, { cells: state.cells, guilds: state.guilds, head: state.head, headAt: state.headAt })
+  draw(view, { cells: state.cells, guilds: state.guilds, moods: state.moods ?? new Map(), head: state.head, headAt: state.headAt })
   requestAnimationFrame(frame)
 }
 

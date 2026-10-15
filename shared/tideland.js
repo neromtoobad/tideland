@@ -34,10 +34,10 @@ export const HOME_MAX_SECONDS = 3 * 86400
 export const HOME_STYLES = ["pine", "stone", "driftwood"]
 export const TEND_SECONDS = 30 * 86400 // a guestbook line is remembered for a month
 
-export function buildHome(wallet, { x, y, name, style }) {
+export function buildHome(wallet, { x, y, name, style, islander, look }) {
   return wallet.createEntity({
-    attributes: { ...common("home"), x: i32(x), y: i32(y), style: str(HOME_STYLES.includes(style) ? style : "pine") },
-    payload: jsonToPayload({ name: String(name).slice(0, 40) }),
+    attributes: { ...common("home"), x: i32(x), y: i32(y), style: str(HOME_STYLES.includes(style) ? style : "pine"), look: str(LOOKS.includes(look) ? look : "carpenter") },
+    payload: jsonToPayload({ name: String(name).slice(0, 40), islander: String(islander || "").slice(0, 24) }),
     contentType: "application/json",
     expires: ExpirationTime.fromSeconds(HOME_START_SECONDS),
     flags: { permissionlessExtension: true },
@@ -62,6 +62,101 @@ export function tendHome(wallet, { home, target, minutes, note }) {
   })
 }
 export const homeMaxExpiry = (head) => head + lifetimeBlocks(HOME_MAX_SECONDS)
+
+// ---------- Islanders: needs are entities ----------
+// Every islander lives in a home. Each need is satisfied by an entity whose lifetime IS the need's decay:
+// a meal feeds for 8 h, a night's sleep rests for 12 h, a friend's visit warms for 24 h, the house stands up to 3 days.
+export const LOOKS = ["carpenter", "mason", "lamplighter"]
+export const NEEDS = {
+  food: { kind: "meal", seconds: 8 * 3600, label: "Food" },
+  rest: { kind: "sleep", seconds: 12 * 3600, label: "Rest" },
+  friends: { kind: "visit", seconds: 24 * 3600, label: "Friends" },
+}
+export const DISHES = ["fish stew", "grilled mackerel", "crab broth", "seaweed bread", "smoked herring", "clam chowder"]
+
+const needCreate = (kind, homeKey, seconds, payload, extra = {}) => ({
+  attributes: { ...common(kind), home: keyAttr(homeKey), ...extra },
+  payload: jsonToPayload(payload),
+  contentType: "application/json",
+  expires: ExpirationTime.fromSeconds(seconds),
+  flags: { readonly: true },
+})
+
+/** Go fishing: a meal you caught yourself, for your own islander. */
+export function fish(wallet, { home, dish }) {
+  return wallet.createEntity(needCreate("meal", home.key, NEEDS.food.seconds, { dish, caught: true }, { dish: str(dish) }))
+}
+
+/** Go to bed. */
+export function sleep(wallet, { home }) {
+  return wallet.createEntity(needCreate("sleep", home.key, NEEDS.rest.seconds, {}))
+}
+
+/**
+ * A friend's visit, as ONE atomic batch of up to four operations:
+ *  - create a visit (24 h; the Friends need), with an optional note;
+ *  - optionally create a meal and hand it to the islander's owner (the cook stays $creator, the eater becomes $owner);
+ *  - optionally extend the home (keep it afloat) and write the tend record.
+ * Creates lead the batch and ownership changes come last, so the meal's predicted key is transferable in the same tx.
+ */
+export async function visit(wallet, reader, { home, note, dish, addBlocks = 0n }) {
+  const creates = [needCreate("visit", home.key, NEEDS.friends.seconds, { note: String(note ?? "").slice(0, 80) })]
+  const ownershipChanges = []
+  const extensions = []
+  if (dish) {
+    // keys follow batch order: [visit, meal]; each create must carry the salt that mints its predicted key
+    const [v, meal] = await reader.predictEntityKeys({ owner: wallet.account.address, count: 2 })
+    creates[0].salt = v.salt
+    creates.push({ ...needCreate("meal", home.key, NEEDS.food.seconds, { dish }, { dish: str(dish) }), salt: meal.salt })
+    ownershipChanges.push({ entityKey: meal.key, newOwner: home.owner })
+  }
+  let target = null, minutes = 0
+  if (addBlocks > 0n) {
+    const head = (await reader.getBlockTiming()).currentBlock
+    const cap = homeMaxExpiry(head), base = home.expiresAt > head ? home.expiresAt : head
+    target = base + addBlocks > cap ? cap : base + addBlocks
+    if (target > home.expiresAt) {
+      minutes = (Number(target - home.expiresAt) * BLOCK_SECONDS) / 60
+      extensions.push({ entityKey: home.key, expires: ExpirationTime.atBlock(target) })
+      creates.push({
+        attributes: { ...common("tend"), home: keyAttr(home.key), minutes: i32(Math.round(minutes)) },
+        payload: jsonToPayload({ note: String(note ?? "").slice(0, 80) }),
+        contentType: "application/json",
+        expires: ExpirationTime.fromSeconds(TEND_SECONDS),
+        flags: { readonly: true },
+      })
+    }
+  }
+  const r = await wallet.executeBatch({ creates, ownershipChanges, extensions })
+  return { ...r, target, minutes }
+}
+
+/** Everything that happened to one islander: one query for its meals, sleeps, visits and saves. */
+export const lifeQuery = (client, homeKey) => client.select(FIELDS).where(eq("app", APP), eq("world", WORLD), eq("home", keyAttr(homeKey)))
+
+/**
+ * An islander's needs (0..1 each) and mood, from the live entities pointing at its home.
+ * `life` = things with home === key; `owner` = the home's owner (visits by the owner don't count as friends).
+ */
+export function needsOf(home, life, head) {
+  const alive = life.filter((t) => t.expiresAt > head)
+  const best = (kind) => alive.filter((t) => t.kind === kind).reduce((m, t) => (t.expiresAt > m ? t.expiresAt : m), 0n)
+  const frac = (kind, seconds) => Math.max(0, Math.min(1, Number(best(kind) - head) / Number(lifetimeBlocks(seconds))))
+  const food = frac("meal", NEEDS.food.seconds), rest = frac("sleep", NEEDS.rest.seconds)
+  const friendsAlive = alive.filter((t) => t.kind === "visit" && t.creator?.toLowerCase() !== home.owner?.toLowerCase())
+  const friends = Math.min(1, new Set(friendsAlive.map((t) => t.creator.toLowerCase())).size / 3) * (friendsAlive.length ? 0.4 + 0.6 * frac("visit", NEEDS.friends.seconds) : 0)
+  const homeFrac = Math.max(0, Math.min(1, Number(home.expiresAt - head) / Number(lifetimeBlocks(HOME_MAX_SECONDS))))
+  const age = (kind) => { const t = alive.filter((x) => x.kind === kind).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0]; return t ? Number(head - t.createdAt) : Infinity }
+  let mood = "happy"
+  if (age("sleep") < 1800) mood = "sleeping" // the first hour of a night's sleep
+  else if (age("meal") < 450) mood = "eating" // the first 15 minutes of a meal
+  else if (age("visit") < 900) mood = "waving" // a friend dropped by in the last 30 minutes
+  else if (home.expiresAt - head < 10800n) mood = "sad" // the water is at the door
+  else if (food === 0) mood = "hungry"
+  else if (rest === 0) mood = "sleepy"
+  else if (friends === 0) mood = "sad"
+  return { food, rest, friends, home: homeFrac, mood, alive }
+}
 
 /**
  * Add `addBlocks` of life to a home on top of whatever it has NOW. If someone else extended it first,
@@ -169,6 +264,8 @@ export function toThing(e) {
     y: a.y === undefined ? undefined : Number(a.y),
     material: a.material ?? (a.kind === "home" ? a.style : undefined),
     style: a.style,
+    look: a.look,
+    dish: a.dish,
     home: a.home,
     parcel: a.parcel,
     guild: a.guild,

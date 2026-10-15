@@ -16,9 +16,10 @@ import { privateKeyToAccount, generatePrivateKey } from "viem/accounts"
 import {
   SIZE, MATERIALS, DAY_BLOCKS, publicClient, walletClient, collect, worldQuery, guildsQuery, layout, lifeLeft,
   claimAndBuild, renew, tend, inscribe, foundGuild, sell, build, placeCommons, COMMONS,
-  buildHome, keepAfloat, homesQuery, HOME_STYLES,
+  buildHome, keepAfloat, homesQuery, HOME_STYLES, fish, sleep as goToBed, visit, lifeQuery, needsOf, DISHES,
 } from "../shared/tideland.js"
-import { ExpirationTime } from "@arkiv-network/sdk"
+import { ExpirationTime, jsonToPayload } from "@arkiv-network/sdk"
+import { str } from "@arkiv-network/sdk/attr"
 
 const home = (n) => `${homedir()}/.tideland/${n}`
 const secret = (env, file, make) => {
@@ -81,35 +82,51 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a)
 
 const HOME_NAMES = ["Kelp Cottage", "Gull's Rest", "Saltbox", "Netmender's House", "Low Tide Lodge", "Oyster Shack", "Brine Hall", "Sandpiper House", "Driftwood Den"]
-const NOTES = ["Kept your lamp lit tonight.", "Saw the water rising, couldn't let it go.", "Neighbours look after neighbours.",
-  "Back from the nets, patched your roof.", "The Lamplighters saw your light going out.", "One more day, friend.", "", "", ""]
+const ISLANDERS = ["Ada", "Tunde", "Mira", "Kofi", "Lena", "Ife", "Bram", "Nneka", "Oto"]
+const LOOK_OF_GUILD = ["carpenter", "mason", "lamplighter"]
+const NOTES = ["Brought you something warm.", "Saw the water rising, couldn't leave you.", "Neighbours look after neighbours.",
+  "Back from the nets, thought of you.", "The Lamplighters saw your light going out.", "One more day, friend.", "Just saying hi.", "", ""]
 
-/** Every villager keeps a home; villagers drop in on each other's homes, and now and then rescue a stranger's. */
+/** Every villager is an islander with needs. They look after themselves, and after each other. */
 async function village() {
   const h = await head()
   const homes = (await collect(homesQuery(pub))).filter((x) => x.expiresAt > h)
   const w = await world()
+  const byCreator = (a) => homes.find((x) => x.creator.toLowerCase() === a.toLowerCase())
   for (const b of BOTS) {
-    const mine = homes.find((x) => x.creator.toLowerCase() === b.account.address.toLowerCase())
+    const mine = byCreator(b.account.address)
+    const look = LOOK_OF_GUILD[b.guild], islander = ISLANDERS[b.i % ISLANDERS.length]
     if (!mine) {
       const cell = freeCellNear(w, GUILDS[b.guild].home, 6); if (!cell) continue
       w.cells.set(`${cell.x}:${cell.y}`, { parcel: true })
-      await safely(`${GUILDS[b.guild].name} builds a home`, () => buildHome(b.wallet, { ...cell, name: HOME_NAMES[b.i % HOME_NAMES.length], style: pick(HOME_STYLES) }))
+      await safely(`${islander} moves in`, () => buildHome(b.wallet, { ...cell, name: HOME_NAMES[b.i % HOME_NAMES.length], style: pick(HOME_STYLES), islander, look }))
+    } else if (!mine.look) {
+      // homes from before islanders existed: patch in who lives there (homes are not readonly)
+      await safely(`${islander} settles into ${mine.data.name}`, () => b.wallet.patchEntity({
+        entityKey: mine.key, set: { look: str(look) }, payload: jsonToPayload({ ...mine.data, islander }), contentType: "application/json",
+      }))
     }
   }
   const botAddrs = new Set(BOTS.map((b) => b.account.address.toLowerCase()))
+  const lives = new Map(await Promise.all(homes.map(async (x) => [x.key, needsOf(x, await collect(lifeQuery(pub, x.key)), h)])))
   await Promise.all(BOTS.map(async (b) => {
-    // visit a fellow villager's home that's under a day, sometimes
-    const others = homes.filter((x) => botAddrs.has(x.creator.toLowerCase()) && x.creator.toLowerCase() !== b.account.address.toLowerCase() && x.expiresAt - h < 43200n)
-    if (others.length && Math.random() < 0.3) await visit(b, pick(others), h)
-    // a stranger's home in its last two hours: rare rescue
-    const strangers = homes.filter((x) => !botAddrs.has(x.creator.toLowerCase()) && x.expiresAt - h < 3600n)
-    if (strangers.length && Math.random() < 0.15) await visit(b, pick(strangers), h)
+    const home = byCreator(b.account.address), n = home && lives.get(home.key)
+    if (n && n.food < 0.35 && Math.random() < 0.7) await safely(`${home.data.islander ?? "?"} goes fishing`, () => fish(b.wallet, { home, dish: pick(["grilled mackerel", "smoked herring", "fish stew"]) }))
+    if (n && n.rest < 0.25 && Math.random() < 0.8) await safely(`${home.data.islander ?? "?"} goes to bed`, () => goToBed(b.wallet, { home }))
+    // visit a lonely neighbour, often with food, sometimes shoring up their house
+    const lonely = homes.filter((x) => botAddrs.has(x.creator.toLowerCase()) && x.key !== home?.key && (lives.get(x.key)?.friends ?? 0) < 0.5)
+    if (lonely.length && Math.random() < 0.35) await call(b, pick(lonely), lives, h)
+    // a player's islander in trouble: rare, so friends still matter most
+    const strangers = homes.filter((x) => !botAddrs.has(x.creator.toLowerCase()) && (x.expiresAt - h < 3600n || lives.get(x.key)?.mood === "hungry"))
+    if (strangers.length && Math.random() < 0.12) await call(b, pick(strangers), lives, h)
   }))
 }
-async function visit(b, home, h) {
-  const addBlocks = BigInt(Math.round((2 + Math.random() * 6) * 1800)) // 2 to 8 hours
-  await safely(`${GUILDS[b.guild].name} keeps ${home.data.name} afloat`, () => keepAfloat(b.wallet, pub, { home, addBlocks, note: pick(NOTES) }))
+async function call(b, home, lives, h) {
+  const n = lives.get(home.key)
+  const dish = n && n.food < 0.5 ? pick(DISHES) : null
+  const addBlocks = home.expiresAt - h < 43200n ? BigInt(Math.round((2 + Math.random() * 4) * 1800)) : 0n
+  await safely(`${GUILDS[b.guild].name} visits ${home.data.islander ?? home.data.name}${dish ? ` with ${dish}` : ""}${addBlocks ? " and shores up the house" : ""}`,
+    () => visit(b.wallet, pub, { home, note: pick(NOTES), dish, addBlocks }))
 }
 
 async function head() { return (await pub.getBlockTiming()).currentBlock }

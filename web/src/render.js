@@ -2,7 +2,9 @@
 import { SIZE, lifeLeft, BLOCK_SECONDS, MATERIALS, COMMONS } from "../../shared/tideland.js"
 
 const TW = 96, TH = 48 // tile diamond at zoom 1
-const SPRITES = ["driftwood", "pine", "stone", "monument", "lighthouse", "plot", "inscription", "buoy", "jetty", "seawall",
+const POSES = ["", "-hungry", "-sleepy", "-sleeping", "-eating", "-waving"]
+const SPRITES = ["driftwood", "pine", "stone", "monument", "lighthouse", "plot", "inscription", "buoy", "jetty", "seawall", "stew",
+  ...["carpenter", "mason", "lamplighter"].flatMap((l) => POSES.map((p) => l + p)),
   "carpenter", "carpenter-sad", "mason", "mason-sad", "lamplighter", "lamplighter-sad"]
 const img = {}
 export const spriteUrl = (n) => `/sprites/${n}.webp`
@@ -98,7 +100,7 @@ export function draw(view, world) {
 
   // depth-sorted objects
   const order = [...world.cells.values()].sort((a, b) => (a.x + a.y) - (b.x + b.y) || a.x - b.x)
-  const actors = []
+  const actors = [], islanders = []
   for (const c of order) {
     const { sx, sy } = view.toScreen(c.x, c.y)
     if (sx < -w * 2 || sx > innerWidth + w * 2 || sy < -h * 6 || sy > innerHeight + h * 2) continue
@@ -106,6 +108,7 @@ export function draw(view, world) {
     if (s) {
       drawThing(ctx, s.material, s, head, sx, sy, w, h, t)
       if (s.material === "lighthouse" && s.expiresAt > head) drawBeam(ctx, s, head, sx, sy, w, t)
+      if (s.kind === "home") islanders.push({ c, s, mood: world.moods.get(s.key) ?? "happy" })
       const guild = world.guilds.get(s.guild)
       const ch = characterFor(guild)
       if (ch) actors.push({ c, s, ch })
@@ -142,6 +145,30 @@ export function draw(view, world) {
       const q = k - off; if (q <= 0) continue
       ctx.strokeStyle = `rgba(255,255,255,${(1 - q) * 0.9})`; ctx.lineWidth = 2.5 * zoom
       ctx.beginPath(); ctx.ellipse(sx, sy + h / 2, w * (0.2 + q * 0.7), h * (0.2 + q * 0.7), 0, 0, Math.PI * 2); ctx.stroke()
+    }
+  }
+
+  // islanders: each one beside their home, pose and bubble from their needs, pottering about a little
+  if (zoom >= 0.45 && !view.run) {
+    const BUBBLE = { hungry: "🍲", sleepy: "💤", sad: "💧", sleeping: "💤", eating: "😋", waving: "👋" }
+    for (const { c, s, mood } of islanders) {
+      const suffix = { happy: "", hungry: "-hungry", sleepy: "-sleepy", sad: "-sad", sleeping: "-sleeping", eating: "-eating", waving: "-waving" }[mood] ?? ""
+      const sprite = img[`${s.look || "carpenter"}${suffix}`]
+      if (!sprite?.complete || !sprite.naturalWidth) continue
+      const seed = parseInt(s.key.slice(-4), 16)
+      const still = mood === "sleeping" || mood === "eating" || mood === "sad"
+      const wx = still ? 0.55 : 0.55 + 0.25 * Math.sin(t * 0.35 + seed), wy = still ? 0.9 : 0.9 + 0.2 * Math.cos(t * 0.3 + seed)
+      const { sx, sy } = view.toScreen(c.x + wx, c.y + wy)
+      const cw = w * (mood === "sleeping" ? 0.5 : 0.36), chh = cw * (sprite.naturalHeight / sprite.naturalWidth)
+      const hop = still ? 0 : Math.abs(Math.sin(t * 4 + seed)) * 2 * zoom
+      ctx.drawImage(sprite, sx - cw / 2, sy - chh - hop, cw, chh)
+      const b = BUBBLE[mood]
+      if (b) {
+        const bx = sx + cw * 0.35, by = sy - chh - 6 * zoom, r = 9 * zoom
+        ctx.fillStyle = "rgba(251,252,250,.95)"; ctx.beginPath(); ctx.arc(bx, by, r, 0, Math.PI * 2); ctx.fill()
+        ctx.strokeStyle = "rgba(27,43,42,.15)"; ctx.lineWidth = 1; ctx.stroke()
+        ctx.font = `${Math.round(11 * zoom)}px sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(b, bx, by + 0.5)
+      }
     }
   }
 

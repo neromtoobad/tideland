@@ -204,13 +204,17 @@ a.btn { display: inline-block; font: 600 13px "Albert Sans", sans-serif; border-
 .hstats b { display: block; font: 700 17px "IBM Plex Mono", monospace; } .hstats b.sink { color: var(--sink); }
 .hstats span { font-size: 11.5px; color: var(--muted); }
 .diorama { position: relative; height: 230px; border-radius: 16px; overflow: hidden; background: linear-gradient(180deg, #e6efec 0%, #f3ede0 100%); border: 1px solid var(--line); }
-.diorama img { position: absolute; left: 50%; bottom: 18px; width: 230px; margin-left: -115px; transition: transform .25s ease; filter: drop-shadow(0 10px 14px rgba(27,43,42,.18)); }
+.diorama img.home { position: absolute; left: 50%; bottom: 18px; width: 220px; margin-left: -150px; transition: transform .25s ease; filter: drop-shadow(0 10px 14px rgba(27,43,42,.18)); }
+.diorama img.islander { position: absolute; right: 26px; bottom: 26px; height: 150px; z-index: 2; filter: drop-shadow(0 6px 8px rgba(27,43,42,.2)); transition: transform .2s ease; }
+.diorama .bubble { position: absolute; right: 22px; top: 18px; z-index: 3; font-size: 26px; background: #fff; border-radius: 50%; width: 44px; height: 44px; display: grid; place-items: center; box-shadow: var(--shadow); }
+.diorama .bubble:empty { display: none; }
 .diorama .water { position: absolute; left: 0; right: 0; bottom: 0; background: linear-gradient(180deg, rgba(127,183,174,.78), rgba(76,140,132,.92)); transition: height .25s ease; }
 .diorama .water i { position: absolute; left: -50%; top: -10px; width: 200%; height: 20px; background: radial-gradient(ellipse at 25% 100%, transparent 58%, rgba(127,183,174,.78) 60%) 0 0 / 60px 20px repeat-x; animation: swell 3.2s linear infinite; }
 .diorama .water i + i { top: -6px; opacity: .55; animation-duration: 5s; animation-direction: reverse; }
 @keyframes swell { from { transform: translateX(0) } to { transform: translateX(60px) } }
 .diorama .gain { position: absolute; top: 14px; right: 16px; font: 700 26px "IBM Plex Mono", monospace; color: var(--tide); text-shadow: 0 2px 0 #fff; }
-.diorama.lifting img { animation: bob .5s ease-in-out infinite alternate; }
+.diorama.lifting img.home { animation: bob .5s ease-in-out infinite alternate; }
+.diorama .water { z-index: 1; }
 @keyframes bob { from { margin-bottom: 0 } to { margin-bottom: 6px } }
 .holdbtn {
   position: relative; width: 100%; padding: 18px 16px; font: 700 18px "Albert Sans", sans-serif; color: #fff; border: 0; border-radius: 16px;
@@ -242,3 +246,17 @@ body.embed { background: var(--mist); }
 body.embed .house { position: static; width: auto; max-height: none; margin: 0; border: 0; border-radius: 0; box-shadow: none; min-height: 100vh; }
 body.embed .house .close { display: none; }
 .saved { color: var(--tide); font-size: 13.5px; }
+
+/* ---------- Islanders ---------- */
+.mood { margin: -4px 0 0; font-size: 14px; color: var(--muted); }
+.mood-hungry, .mood-sad, .mood-sleepy { color: var(--sink); }
+.needs { display: flex; flex-direction: column; gap: 8px; }
+.need .nl { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; margin-bottom: 3px; }
+.need .nl b { font-size: 13px; } .need .nl span { color: var(--muted); text-align: right; } .need .nl span a { color: var(--tide); }
+.need.low .nl b { color: var(--sink); }
+.acts { display: grid; grid-template-columns: 1.4fr 1fr; gap: 8px; }
+.holdbtn.small-hold { padding: 12px; font-size: 15px; }
+.holdbtn[disabled] { background: var(--rule); color: var(--muted); box-shadow: none; }
+.bring { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
+.bring input { width: auto; }
+.diary li { grid-template-columns: 54px 1fr; }
