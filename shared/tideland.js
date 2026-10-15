@@ -25,6 +25,66 @@ export const MATERIALS = {
   seawall: { label: "Sea wall", seconds: 86400, flags: { permissionlessExtension: true }, commons: true, blurb: "Holds the sea off the houses behind it, for a day at a time." },
 }
 export const BUILDABLE = ["driftwood", "pine", "stone", "monument", "lighthouse"]
+
+// ---------- Homes: the personal heart of the game ----------
+// A home belongs to you but is created with permissionlessExtension, so only other people can really keep
+// it alive. It starts with 12 hours and can never hold more than 3 days: it needs friends, often.
+export const HOME_START_SECONDS = 12 * 3600
+export const HOME_MAX_SECONDS = 3 * 86400
+export const HOME_STYLES = ["pine", "stone", "driftwood"]
+export const TEND_SECONDS = 30 * 86400 // a guestbook line is remembered for a month
+
+export function buildHome(wallet, { x, y, name, style }) {
+  return wallet.createEntity({
+    attributes: { ...common("home"), x: i32(x), y: i32(y), style: str(HOME_STYLES.includes(style) ? style : "pine") },
+    payload: jsonToPayload({ name: String(name).slice(0, 40) }),
+    contentType: "application/json",
+    expires: ExpirationTime.fromSeconds(HOME_START_SECONDS),
+    flags: { permissionlessExtension: true },
+  })
+}
+
+/**
+ * Keep a home afloat: ONE atomic batch that extends the home to `target` AND writes a signed tend record
+ * (who, how long, an optional note). Either both land or neither, so the guestbook can never claim a save
+ * that didn't happen, and every save has a verifiable author ($creator of the tend record).
+ */
+export function tendHome(wallet, { home, target, minutes, note }) {
+  return wallet.executeBatch({
+    extensions: [{ entityKey: home.key, expires: ExpirationTime.atBlock(target) }],
+    creates: [{
+      attributes: { ...common("tend"), home: keyAttr(home.key), minutes: i32(Math.round(minutes)) },
+      payload: jsonToPayload({ note: String(note ?? "").slice(0, 80) }),
+      contentType: "application/json",
+      expires: ExpirationTime.fromSeconds(TEND_SECONDS),
+      flags: { readonly: true },
+    }],
+  })
+}
+export const homeMaxExpiry = (head) => head + lifetimeBlocks(HOME_MAX_SECONDS)
+
+/**
+ * Add `addBlocks` of life to a home on top of whatever it has NOW. If someone else extended it first,
+ * our target would shorten its life and the engine reverts the whole batch (so no false guestbook line);
+ * we then re-read its expiry and stack our time on top of theirs, once.
+ */
+export async function keepAfloat(wallet, reader, { home, addBlocks, note }) {
+  for (let attempt = 0; ; attempt++) {
+    const head = (await reader.getBlockTiming()).currentBlock
+    const cap = homeMaxExpiry(head)
+    const base = home.expiresAt > head ? home.expiresAt : head
+    const target = base + addBlocks > cap ? cap : base + addBlocks
+    if (target <= home.expiresAt) return { full: true }
+    const minutes = (Number(target - home.expiresAt) * BLOCK_SECONDS) / 60
+    try {
+      const r = await tendHome(wallet, { home, target, minutes, note })
+      return { ...r, target, minutes }
+    } catch (e) {
+      if (attempt > 0 || !/shorten/i.test(String(e.message))) throw e
+      home = toThing(await reader.getEntity(home.key))
+    }
+  }
+}
 export const COMMONS = Object.keys(MATERIALS).filter((k) => MATERIALS[k].commons)
 export const PARCEL_SECONDS = 14 * 86400
 export const GUILD_SECONDS = 30 * 86400
@@ -107,7 +167,9 @@ export function toThing(e) {
     kind: a.kind,
     x: a.x === undefined ? undefined : Number(a.x),
     y: a.y === undefined ? undefined : Number(a.y),
-    material: a.material,
+    material: a.material ?? (a.kind === "home" ? a.style : undefined),
+    style: a.style,
+    home: a.home,
     parcel: a.parcel,
     guild: a.guild,
     owner: e.owner,
@@ -134,7 +196,7 @@ export function layout(things) {
   for (const t of things) {
     if (t.x === undefined) continue
     if (t.kind === "parcel") cell(t.x, t.y).parcels.push(t)
-    else if (t.kind === "structure") cell(t.x, t.y).structures.push(t)
+    else if (t.kind === "structure" || t.kind === "home") cell(t.x, t.y).structures.push(t)
     else if (t.kind === "inscription") cell(t.x, t.y).inscriptions.push(t)
   }
   const byAge = (a, b) => (a.createdAt === b.createdAt ? (a.key < b.key ? -1 : 1) : a.createdAt < b.createdAt ? -1 : 1)
@@ -145,7 +207,7 @@ export function layout(things) {
     // Only a structure on the winning parcel counts; others are squatters drawn as ghosts.
     c.structures.sort(byAge)
     // Commons stand on open coast with no parcel; anything else must sit on the winning parcel.
-    const isCommons = (s) => !s.parcel && MATERIALS[s.material]?.commons
+    const isCommons = (s) => s.kind === "home" || (!s.parcel && MATERIALS[s.material]?.commons)
     c.structure = c.structures.find((s) => c.parcel && s.parcel === c.parcel.key) ?? c.structures.find(isCommons) ?? null
     c.squatters = c.structures.filter((s) => s !== c.structure && !isCommons(s))
   }
@@ -155,6 +217,7 @@ export function layout(things) {
 /** 0..1 share of its material lifetime still left. */
 export function lifeLeft(thing, head) {
   const span = thing.kind === "parcel" ? lifetimeBlocks(PARCEL_SECONDS)
+    : thing.kind === "home" ? lifetimeBlocks(HOME_MAX_SECONDS)
     : thing.kind === "guild" ? lifetimeBlocks(GUILD_SECONDS)
     : thing.material ? lifetimeBlocks(MATERIALS[thing.material].seconds)
     : DAY_BLOCKS
@@ -269,6 +332,9 @@ export function recordRun(wallet, { score, saved, patches, batches, maxCombo, ke
     flags: { readonly: true },
   })
 }
+export const homesQuery = (client) => client.select(FIELDS).where(base("home"))
+export const tendsQuery = (client, homeKey) => client.select(FIELDS).where(...base("tend"), eq("home", keyAttr(homeKey)))
+export const tendsByQuery = (client, address) => client.select(FIELDS).where(base("tend")).createdBy(address)
 export const runsQuery = (client) => client.select(FIELDS).where(base("run"))
 export const commonsQuery = (client) => client.select(FIELDS).where(base("structure"), or(COMMONS.map((m) => eq("material", m))))
 

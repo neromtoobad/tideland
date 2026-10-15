@@ -16,6 +16,7 @@ import { privateKeyToAccount, generatePrivateKey } from "viem/accounts"
 import {
   SIZE, MATERIALS, DAY_BLOCKS, publicClient, walletClient, collect, worldQuery, guildsQuery, layout, lifeLeft,
   claimAndBuild, renew, tend, inscribe, foundGuild, sell, build, placeCommons, COMMONS,
+  buildHome, keepAfloat, homesQuery, HOME_STYLES,
 } from "../shared/tideland.js"
 import { ExpirationTime } from "@arkiv-network/sdk"
 
@@ -78,6 +79,38 @@ const LINES = ["We built this before the storm.", "Mind the tide, it does not mi
 const pick = (a) => a[Math.floor(Math.random() * a.length)]
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a)
+
+const HOME_NAMES = ["Kelp Cottage", "Gull's Rest", "Saltbox", "Netmender's House", "Low Tide Lodge", "Oyster Shack", "Brine Hall", "Sandpiper House", "Driftwood Den"]
+const NOTES = ["Kept your lamp lit tonight.", "Saw the water rising, couldn't let it go.", "Neighbours look after neighbours.",
+  "Back from the nets, patched your roof.", "The Lamplighters saw your light going out.", "One more day, friend.", "", "", ""]
+
+/** Every villager keeps a home; villagers drop in on each other's homes, and now and then rescue a stranger's. */
+async function village() {
+  const h = await head()
+  const homes = (await collect(homesQuery(pub))).filter((x) => x.expiresAt > h)
+  const w = await world()
+  for (const b of BOTS) {
+    const mine = homes.find((x) => x.creator.toLowerCase() === b.account.address.toLowerCase())
+    if (!mine) {
+      const cell = freeCellNear(w, GUILDS[b.guild].home, 6); if (!cell) continue
+      w.cells.set(`${cell.x}:${cell.y}`, { parcel: true })
+      await safely(`${GUILDS[b.guild].name} builds a home`, () => buildHome(b.wallet, { ...cell, name: HOME_NAMES[b.i % HOME_NAMES.length], style: pick(HOME_STYLES) }))
+    }
+  }
+  const botAddrs = new Set(BOTS.map((b) => b.account.address.toLowerCase()))
+  await Promise.all(BOTS.map(async (b) => {
+    // visit a fellow villager's home that's under a day, sometimes
+    const others = homes.filter((x) => botAddrs.has(x.creator.toLowerCase()) && x.creator.toLowerCase() !== b.account.address.toLowerCase() && x.expiresAt - h < 43200n)
+    if (others.length && Math.random() < 0.3) await visit(b, pick(others), h)
+    // a stranger's home in its last two hours: rare rescue
+    const strangers = homes.filter((x) => !botAddrs.has(x.creator.toLowerCase()) && x.expiresAt - h < 3600n)
+    if (strangers.length && Math.random() < 0.15) await visit(b, pick(strangers), h)
+  }))
+}
+async function visit(b, home, h) {
+  const addBlocks = BigInt(Math.round((2 + Math.random() * 6) * 1800)) // 2 to 8 hours
+  await safely(`${GUILDS[b.guild].name} keeps ${home.data.name} afloat`, () => keepAfloat(b.wallet, pub, { home, addBlocks, note: pick(NOTES) }))
+}
 
 async function head() { return (await pub.getBlockTiming()).currentBlock }
 async function world() {
@@ -153,6 +186,7 @@ async function seedWorld() {
 async function tick() {
   const w = await world()
   await harbour(w)
+  await safely("village", village)
   await Promise.all(BOTS.map(async (b) => {
     const me = b.account.address.toLowerCase(), g = GUILDS[b.guild]
     const mine = [...w.cells.values()].filter((c) => c.structure && c.structure.owner.toLowerCase() === me)
@@ -204,6 +238,7 @@ else if (cmd === "fund") await fund(arg)
 else if (cmd === "seed") { await fund(arg ?? "0.05"); await seedWorld() }
 else if (cmd === "tick") await tick()
 else if (cmd === "harbour") await harbour(await world())
+else if (cmd === "village") await village()
 else if (cmd === "loop") {
   const every = Number(arg ?? 20) * 60_000
   for (;;) { await safely("fund", () => fund()); await safely("tick", tick); await sleep(every) }

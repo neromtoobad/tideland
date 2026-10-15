@@ -6,6 +6,7 @@ import {
 import { createView, draw, loadSprites, spriteUrl, characterFor } from "./render.js"
 import { localWallet, injectedWallet, balanceOf, drip } from "./wallet.js"
 import { createRun } from "./run.js"
+import { createHouse } from "./house.js"
 
 const EXPLORER = "https://tiramisu.explorer.arkiv.network"
 const REPO = "https://github.com/neromtoobad/tideland"
@@ -95,6 +96,7 @@ function watchLive() {
       try {
         const tx = await pub.getTransaction({ hash: e.transactionHash })
         state.tenders.set(e.entityKey, tx.from)
+        house.onExtended(e.entityKey, e.expiresAt, tx.from)
         const t = state.things.get(e.entityKey)
         ripple(e.entityKey, same(tx.from, t?.owner) ? "renewed by its holder" : `tended by ${short(tx.from)}`)
       } catch { ripple(e.entityKey, "renewed") }
@@ -114,6 +116,7 @@ function ripple(key, what) {
 // ---------------- tide map ----------------
 
 function thingLabel(t) {
+  if (t.kind === "home") return `${t.data.name || "A house"} (house)`
   if (t.kind === "structure") return t.data.name || MATERIALS[t.material]?.label
   if (t.kind === "parcel") return (t.data.name || "Unbuilt land") + " (land)"
   if (t.kind === "inscription") return `“${(t.data.text || "").slice(0, 28)}”`
@@ -121,6 +124,7 @@ function thingLabel(t) {
   return t.kind
 }
 function thingSprite(t) {
+  if (t.kind === "home") return spriteUrl(t.style || "pine")
   if (t.kind === "structure") return spriteUrl(t.material)
   if (t.kind === "inscription") return spriteUrl("inscription")
   if (t.kind === "guild") return spriteUrl(characterFor(t) || "lamplighter")
@@ -142,6 +146,8 @@ function renderTide() {
 }
 $("tide-list").addEventListener("click", (e) => {
   const li = e.target.closest("li[data-key]"); if (!li) return
+  const tk = state.things.get(li.dataset.key)
+  if (tk?.kind === "home") return house.open(tk.key)
   if (li.classList.contains("lost")) { const x = +li.dataset.x, y = +li.dataset.y; select({ x, y }); view.focus(x, y); return }
   const t = state.things.get(li.dataset.key)
   if (t?.x !== undefined) { select({ x: t.x, y: t.y }); view.focus(t.x, t.y) }
@@ -150,7 +156,11 @@ $("tide-list").addEventListener("click", (e) => {
 
 // ---------------- inspector ----------------
 
-function select(cell) { view.selected = cell; renderInspector() }
+function select(cell) {
+  const s = cell && state.cells.get(`${cell.x}:${cell.y}`)?.structure
+  if (s?.kind === "home") { view.selected = cell; return house.open(s.key) }
+  view.selected = cell; renderInspector()
+}
 
 function lifeBlock(t) {
   const head = headNow(), left = t.expiresAt - head, frac = lifeLeft(t, head)
@@ -392,19 +402,32 @@ console.log(page.entities)</pre>
 
 // ---------------- Keeper Run ----------------
 
-async function ensureRunWallet() {
+async function ensureRunWallet({ quiet = false } = {}) {
   // Runs sign a batch every few seconds, so they use the local key (no wallet pop-up per batch).
   if (state.wallet?.kind !== "local") { state.wallet = localWallet(); try { localStorage.setItem("tideland.mode", "local") } catch {} ; renderWallet() }
   await updateBalance()
   if (!state.balance || state.balance.wei < 3_000_000_000_000_000n) {
-    toast("Topping up your local key with test GLM for the shift…", 0)
+    if (!quiet) toast("Getting your local key some test GLM…", 0)
     try {
       await drip(state.wallet.address)
       for (let i = 0; i < 12; i++) { await new Promise((r) => setTimeout(r, 1500)); await updateBalance(); if (state.balance?.wei >= 3_000_000_000_000_000n) break }
-    } catch (err) { toast(`Couldn't top up: ${esc(err.message)}`, 7000); return null }
+    } catch (err) { if (!quiet) toast(`Couldn't top up: ${esc(err.message)}`, 7000); return quiet ? state.wallet : null }
   }
-  $("toast").hidden = true
+  if (!quiet) $("toast").hidden = true
   return state.wallet
+}
+
+const house = createHouse({
+  state, view, headNow, pub: () => pub, ensureWallet: ensureRunWallet, toast, explorer: EXPLORER, refresh, short, esc, same,
+  onOpen: () => { view.selected = null; renderInspector() },
+})
+document.addEventListener("click", (e) => { if (e.target.closest("[data-myhome]")) house.open(house.myHome()) })
+$("cta-save").onclick = () => {
+  const head = headNow()
+  const homes = [...state.things.values()].filter((t) => t.kind === "home" && t.expiresAt > head && !same(t.owner, state.wallet?.address))
+  homes.sort((a, b) => (a.expiresAt < b.expiresAt ? -1 : 1))
+  if (!homes.length) return toast("No houses are sinking right now. Build one and share it.", 4000)
+  house.open(homes[Math.floor(Math.random() * Math.min(3, homes.length))].key)
 }
 
 const runner = createRun({
@@ -466,6 +489,10 @@ function frame(now) {
   setInterval(() => rebuild(), 10000) // local only: notices what the tide just took
   setInterval(() => updateBalance(), 30000)
   const q = new URLSearchParams(location.search)
+  if (q.has("embed")) { state.embed = true; document.body.classList.add("embed") }
+  const hk = q.get("h") || location.pathname.match(/^\/h\/(0x[0-9a-fA-F]{64})/)?.[1]
+  if (hk) house.open(hk, { push: !location.pathname.startsWith("/h/") })
+  if (house.myHome() && !hk) $("cta-home").outerHTML = `<button class="storm-cta" id="cta-home" onclick="void 0" data-myhome="1">Your house <span>see who kept it afloat</span></button>`
   if (q.has("run")) runner.openLobby()
   if (q.has("x") && q.has("y")) { const x = +q.get("x"), y = +q.get("y"); select({ x, y }); view.focus(x, y) }
 })()

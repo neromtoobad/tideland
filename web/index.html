@@ -16,14 +16,18 @@
   <header class="brand card">
     <div class="eyebrow">Arkiv · Tiramisu · world s1</div>
     <h1>Tide<em>land</em></h1>
-    <p class="tagline">A world the tide is always taking back.</p>
+    <p class="tagline">Your house sinks unless someone keeps it afloat.</p>
     <div class="stats">
       <span><b id="stat-live">–</b> standing</span>
       <span><b id="stat-tide" class="sink">–</b> sink within 24 h</span>
       <span class="mono">block <b id="stat-block">–</b></span>
       <span class="sink small" id="stat-relay" hidden title="Your network's anonymous Arkiv read budget is used up, so reads go through our read-only relay.">via relay</span>
     </div>
-    <button class="storm-cta" data-run="lobby">Start a storm shift <span>90 s · keep the commons afloat</span></button>
+    <button class="storm-cta" id="cta-home" data-house="build">Build your house <span>12 h to start · only friends can keep it up</span></button>
+    <div class="row cta2">
+      <button class="primary" id="cta-save">Save a sinking house</button>
+      <button class="ghost" data-run="lobby">Storm shift</button>
+    </div>
     <div class="row">
       <button class="ghost" id="btn-how">How it works</button>
       <button class="ghost" id="btn-mirror">Read it without us</button>
@@ -49,6 +53,7 @@
   </aside>
 
   <aside class="inspector card" id="inspector" hidden></aside>
+  <section class="house card" id="house" hidden></section>
 
   <div class="zoom">
     <button id="zoom-in" aria-label="Zoom in">+</button>
