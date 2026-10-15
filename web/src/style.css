@@ -142,3 +142,51 @@ dialog form { margin-top: 14px; text-align: right; }
   body.inspecting .wallet, body.inspecting .zoom { display: none; }
   .zoom { bottom: auto; top: 50%; }
 }
+
+/* ---------- Keeper Run ---------- */
+.storm-cta {
+  display: block; width: 100%; margin: 0 0 10px; padding: 12px 14px; text-align: left; border: 0;
+  background: linear-gradient(135deg, #1f6e68, #2b8a7f); color: #fff; font: 700 17px "Albert Sans", sans-serif;
+  border-radius: 12px; box-shadow: 0 3px 0 #14504b, 0 8px 22px rgba(31,110,104,.28);
+}
+.storm-cta span { display: block; font: 500 12px "IBM Plex Mono", monospace; opacity: .85; margin-top: 2px; }
+.storm-cta:hover { background: linear-gradient(135deg, #237a73, #31968a); }
+.run-lobby, .run-result { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; z-index: 20; }
+.run-lobby h2, .run-result h2 { font: 400 36px/1.05 "Instrument Serif", serif; margin: 6px 0 8px; }
+.run-result h2 small { font-size: 18px; color: var(--muted); }
+.run-lobby h3 { margin: 16px 0 2px; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.keepers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0; }
+.keeper { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 6px; text-align: center; }
+.keeper img { height: 86px; object-fit: contain; transition: transform .15s ease; }
+.keeper b { font-size: 14px; } .keeper span { font-size: 11.5px; color: var(--muted); font-weight: 400; }
+.keeper[aria-pressed="true"] { border-color: var(--tide); background: var(--tide-soft); }
+.keeper[aria-pressed="true"] img { transform: translateY(-4px) scale(1.06); }
+button.big { padding: 12px 22px; font-size: 16px; }
+.board { list-style: none; margin: 6px 0 0; padding: 0; }
+.board li { display: grid; grid-template-columns: 28px 1fr auto auto; gap: 10px; align-items: baseline; padding: 6px 0; border-top: 1px solid var(--rule); font-size: 13.5px; }
+.board .rk { font: 700 13px "IBM Plex Mono", monospace; color: var(--gold); }
+.board .sc { font: 700 13px "IBM Plex Mono", monospace; }
+.board .fd { font: 400 11px "IBM Plex Mono", monospace; color: var(--muted); }
+.board .empty { display: block; color: var(--muted); }
+.run-hud { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); display: none; gap: 10px; align-items: stretch; z-index: 15; }
+body.running .run-hud { display: flex; }
+.run-hud > div { background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: 8px 14px; }
+.run-hud .timer { font: 700 28px/1.1 "IBM Plex Mono", monospace; min-width: 96px; text-align: center; }
+.run-hud .timer.low { color: var(--sink); animation: pulse .6s infinite alternate; }
+.run-hud .score { font: 700 24px/1.1 "IBM Plex Mono", monospace; }
+.run-hud .combo { font: 700 12px "IBM Plex Mono", monospace; color: var(--gold); min-height: 14px; }
+.run-hud .sealed { font-size: 13px; } .run-hud .sealed b { font-family: "IBM Plex Mono", monospace; }
+.run-hud .txs { color: var(--muted); } .run-hud .txs a { color: var(--tide); }
+.pulse { animation: pulse .5s infinite alternate; color: var(--tide); }
+@keyframes pulse { from { opacity: .45 } to { opacity: 1 } }
+body.running .brand, body.running .tide, body.running .inspector, body.running .wallet, body.running .zoom { display: none !important; }
+body.running canvas#world { cursor: crosshair; }
+.statgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0 12px; }
+.statgrid > div { background: var(--code); border-radius: 10px; padding: 8px 10px; }
+.statgrid b { display: block; font: 700 18px "IBM Plex Mono", monospace; } .statgrid span { font-size: 11.5px; color: var(--muted); }
+a.btn { display: inline-block; font: 600 13px "Albert Sans", sans-serif; border-radius: 10px; padding: 8px 12px; border: 1px solid var(--line); color: var(--ink); text-decoration: none; }
+@media (max-width: 760px) {
+  .run-hud { top: 8px; gap: 6px; } .run-hud > div { padding: 6px 10px; } .run-hud .timer { font-size: 22px; min-width: 70px; }
+  .run-hud .sealbox { display: none; }
+  .statgrid { grid-template-columns: repeat(2, 1fr); }
+}

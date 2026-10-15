@@ -5,6 +5,7 @@ import {
 } from "../../shared/tideland.js"
 import { createView, draw, loadSprites, spriteUrl, characterFor } from "./render.js"
 import { localWallet, injectedWallet, balanceOf, drip } from "./wallet.js"
+import { createRun } from "./run.js"
 
 const EXPLORER = "https://tiramisu.explorer.arkiv.network"
 const REPO = "https://github.com/neromtoobad/tideland"
@@ -51,7 +52,7 @@ function rebuild() {
   state.guilds = new Map(all.filter((t) => t.kind === "guild").map((g) => [g.key, g]))
   const standing = all.filter((t) => t.kind === "structure").length
   $("stat-live").textContent = standing
-  $("stat-tide").textContent = state.tide.filter((t) => t.expiresAt > headNow()).length
+  $("stat-tide").textContent = state.tide.filter((t) => t.expiresAt > headNow() && t.kind !== "run").length
   renderTide()
   if (view.selected) renderInspector({ soft: true })
 }
@@ -81,10 +82,14 @@ function watchLive() {
   // Each arkiv_query costs 100 units of the visitor's budget, so a burst of events triggers ONE
   // debounced re-read of the world (2 queries) instead of one getEntity per event.
   let pending = null
-  const touch = () => { clearTimeout(pending); pending = setTimeout(() => refresh().catch(() => {}), 2500) }
+  const touch = () => {
+    if (runner.active) return // during a run, events update expiries in place: no re-reads
+    clearTimeout(pending); pending = setTimeout(() => refresh().catch(() => {}), 2500)
+  }
   ws.watchEntityEvents({
     onEntityCreated: touch,
     onExpiryExtended: async (e) => {
+      runner.onExtended(e.entityKey, e.expiresAt) // the event carries the new expiry: apply it directly
       touch(e)
       // The event names the owner, not whoever extended it. For a lighthouse anyone can tend, read the sender.
       try {
@@ -101,6 +106,7 @@ function watchLive() {
 }
 
 function ripple(key, what) {
+  if (runner.active) return
   const t = state.things.get(key)
   if (t && t.x !== undefined && t.kind === "structure") toast(`${esc(t.data.name || MATERIALS[t.material]?.label)} at ${t.x},${t.y} was ${what}`)
 }
@@ -124,7 +130,7 @@ function thingSprite(t) {
 function renderTide() {
   $("tide-query").textContent = state.lastQuery
   const head = headNow()
-  const items = state.tide.filter((t) => t.expiresAt > head).slice(0, 40)
+  const items = state.tide.filter((t) => t.expiresAt > head && t.kind !== "run").slice(0, 40)
   $("tide-list").innerHTML = items.length ? items.map((t) => `
     <li data-key="${t.key}" class="${t.expiresAt - head > 21600n ? "calm" : ""}">
       <img src="${thingSprite(t)}" alt="" />
@@ -384,11 +390,34 @@ console.log(page.entities)</pre>
   <p>Or run the second client that ships in the repo: <code>node cli/tide.mjs map</code> draws the same coast in your terminal, <code>node cli/tide.mjs tide</code> lists what sinks next.</p>
   <p class="note">The tide-map query this page is running right now:</p><pre>${esc(state.lastQuery)}</pre>`)
 
+// ---------------- Keeper Run ----------------
+
+async function ensureRunWallet() {
+  // Runs sign a batch every few seconds, so they use the local key (no wallet pop-up per batch).
+  if (state.wallet?.kind !== "local") { state.wallet = localWallet(); try { localStorage.setItem("tideland.mode", "local") } catch {} ; renderWallet() }
+  await updateBalance()
+  if (!state.balance || state.balance.wei < 3_000_000_000_000_000n) {
+    toast("Topping up your local key with test GLM for the shift…", 0)
+    try {
+      await drip(state.wallet.address)
+      for (let i = 0; i < 12; i++) { await new Promise((r) => setTimeout(r, 1500)); await updateBalance(); if (state.balance?.wei >= 3_000_000_000_000_000n) break }
+    } catch (err) { toast(`Couldn't top up: ${esc(err.message)}`, 7000); return null }
+  }
+  $("toast").hidden = true
+  return state.wallet
+}
+
+const runner = createRun({
+  state, view, headNow, ensureWallet: ensureRunWallet, pub: () => pub, toast, refresh, explorer: EXPLORER,
+})
+
 // ---------------- input ----------------
 
 const canvas = $("world")
 let drag = null
-canvas.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY, ox: view.ox, oy: view.oy, moved: false }; canvas.setPointerCapture(e.pointerId) })
+canvas.addEventListener("pointerdown", (e) => {
+  if (runner.active) { runner.pointerDown(e.clientX, e.clientY); canvas.setPointerCapture(e.pointerId); return }
+  drag = { x: e.clientX, y: e.clientY, ox: view.ox, oy: view.oy, moved: false }; canvas.setPointerCapture(e.pointerId) })
 canvas.addEventListener("pointermove", (e) => {
   if (drag) {
     const dx = e.clientX - drag.x, dy = e.clientY - drag.y
@@ -397,6 +426,7 @@ canvas.addEventListener("pointermove", (e) => {
   } else view.hover = view.toGrid(e.clientX, e.clientY)
 })
 canvas.addEventListener("pointerup", (e) => {
+  if (runner.active) { runner.pointerUp(); return }
   canvas.classList.remove("dragging")
   if (drag && !drag.moved) select(view.toGrid(e.clientX, e.clientY))
   drag = null
@@ -410,11 +440,18 @@ $("zoom-in").onclick = () => zoomAt(innerWidth / 2, innerHeight / 2, 1.25)
 $("zoom-out").onclick = () => zoomAt(innerWidth / 2, innerHeight / 2, 0.8)
 $("zoom-fit").onclick = () => view.fit()
 addEventListener("resize", () => view.resize())
-addEventListener("keydown", (e) => { if (e.key === "Escape") select(null) })
+addEventListener("keydown", (e) => { if (runner.key(e, true)) return; if (e.key === "Escape") select(null) })
+addEventListener("keyup", (e) => { runner.key(e, false) })
 
 // ---------------- boot ----------------
 
-function frame() { draw(view, { cells: state.cells, guilds: state.guilds, head: state.head, headAt: state.headAt }); requestAnimationFrame(frame) }
+let last = performance.now()
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now
+  runner.update(dt)
+  draw(view, { cells: state.cells, guilds: state.guilds, head: state.head, headAt: state.headAt })
+  requestAnimationFrame(frame)
+}
 
 ;(async () => {
   await loadSprites()
@@ -429,5 +466,6 @@ function frame() { draw(view, { cells: state.cells, guilds: state.guilds, head: 
   setInterval(() => rebuild(), 10000) // local only: notices what the tide just took
   setInterval(() => updateBalance(), 30000)
   const q = new URLSearchParams(location.search)
+  if (q.has("run")) runner.openLobby()
   if (q.has("x") && q.has("y")) { const x = +q.get("x"), y = +q.get("y"); select({ x, y }); view.focus(x, y) }
 })()

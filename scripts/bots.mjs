@@ -15,7 +15,7 @@ import { keccak256, toHex, parseEther, formatEther } from "viem"
 import { privateKeyToAccount, generatePrivateKey } from "viem/accounts"
 import {
   SIZE, MATERIALS, DAY_BLOCKS, publicClient, walletClient, collect, worldQuery, guildsQuery, layout, lifeLeft,
-  claimAndBuild, renew, tend, inscribe, foundGuild, sell, build,
+  claimAndBuild, renew, tend, inscribe, foundGuild, sell, build, placeCommons, COMMONS,
 } from "../shared/tideland.js"
 import { ExpirationTime } from "@arkiv-network/sdk"
 
@@ -41,6 +41,33 @@ export const GUILDS = [
 ]
 const BOTS = GUILDS.flatMap((g, gi) => [0, 1, 2].map((j) => ({ guild: gi, role: j === 0 ? "founder" : "villager", i: gi * 3 + j })))
 for (const b of BOTS) { b.account = privateKeyToAccount(botKey(b.i)); b.wallet = walletClient(b.account) }
+// The Harbour Trust places the coast's commons and never maintains them. Upkeep is the players' job.
+const TRUST = { i: 9, role: "trust", account: privateKeyToAccount(botKey(9)) }
+TRUST.wallet = walletClient(TRUST.account)
+const HARBOUR = { buoy: { want: 14, ring: [31, 30] }, jetty: { want: 6, ring: [30, 31] }, seawall: { want: 8, ring: [29, 28] } }
+const HARBOUR_NAMES = { buoy: ["North Bell", "Gull Bell", "Fog Bell", "Kelp Bell", "Shoal Bell", "Sandbar Bell", "Low Bell", "Mist Bell", "Reef Bell", "Wreck Bell", "Tern Bell", "Swell Bell"],
+  jetty: ["Fish Quay", "Crab Steps", "Netting Pier", "Ferry Stage", "Oyster Jetty", "Lobster Landing"], seawall: ["Breakwater", "Storm Wall", "Groyne Row", "Spray Wall", "Tide Bank", "Shingle Wall", "Harbour Arm"] }
+
+/** Cells on a coastal ring: x or y equal to `at` (the far edges face the sea). */
+function ringCell(w, at) {
+  for (let tries = 0; tries < 80; tries++) {
+    const k = Math.floor(Math.random() * SIZE), flip = Math.random() < 0.5
+    const x = flip ? at : k, y = flip ? k : at
+    if (!w.cells.get(`${x}:${y}`)?.structure && !w.cells.get(`${x}:${y}`)?.parcel) return { x, y }
+  }
+  return null
+}
+
+async function harbour(w) {
+  for (const [material, cfg] of Object.entries(HARBOUR)) {
+    const live = [...w.cells.values()].filter((c) => c.structure?.material === material).length
+    for (let n = live; n < cfg.want; n++) {
+      const cell = ringCell(w, cfg.ring[Math.floor(Math.random() * cfg.ring.length)]); if (!cell) break
+      w.cells.set(`${cell.x}:${cell.y}`, { structure: { material } })
+      await safely(`trust places ${material} @${cell.x},${cell.y}`, () => placeCommons(TRUST.wallet, { ...cell, material, name: pick(HARBOUR_NAMES[material]), wear: Math.random() * 0.85 }))
+    }
+  }
+}
 
 const PLACES = ["Saltbreak", "Kelp Hollow", "Gull's Rest", "Brinewatch", "Driftmere", "Oyster Row", "Shell Steps", "Low Tide Inn",
   "Netmender's", "Cobble End", "Spray Point", "Heron Yard", "Ropewalk", "Mussel Bank", "Lantern Lane", "Foam Gate", "Sandpiper",
@@ -77,7 +104,7 @@ async function safely(label, fn) {
 // ---------------------------------------------------------------------------------------------
 
 async function wallets() {
-  for (const b of [{ i: "T", role: "treasury", account: treasury }, ...BOTS]) {
+  for (const b of [{ i: "T", role: "treasury", account: treasury }, ...BOTS, TRUST]) {
     const bal = await pub.getBalance({ address: b.account.address })
     console.log(String(b.i).padStart(2), (b.role).padEnd(9), b.guild !== undefined ? GUILDS[b.guild].name.padEnd(14) : "".padEnd(14), b.account.address, formatEther(bal))
   }
@@ -85,7 +112,7 @@ async function wallets() {
 
 async function fund(amount = "0.05") {
   const want = parseEther(amount), tw = walletClient(treasury)
-  for (const b of BOTS) {
+  for (const b of [...BOTS, TRUST]) {
     const bal = await pub.getBalance({ address: b.account.address })
     if (bal >= want / 2n) continue
     await safely(`fund ${b.account.address} ${amount} GLM`, async () => {
@@ -118,12 +145,14 @@ async function seedWorld() {
       await safely(`flats camp @${cell.x},${cell.y}`, () => claimAndBuild(b.wallet, { x: cell.x, y: cell.y, name: `${pick(PLACES)} Camp`, material: "driftwood" }))
     }
   }))
+  await harbour(await world())
   await safely("inscription", () => inscribe(BOTS[0].wallet, { x: 16, y: 16, text: "Tideland, season one. Everything here is kept alive by someone.", span: "month" }))
 }
 
 /** One round of village life. Each bot acts on its own houses; lamplighters tend every light. */
 async function tick() {
   const w = await world()
+  await harbour(w)
   await Promise.all(BOTS.map(async (b) => {
     const me = b.account.address.toLowerCase(), g = GUILDS[b.guild]
     const mine = [...w.cells.values()].filter((c) => c.structure && c.structure.owner.toLowerCase() === me)
@@ -174,6 +203,7 @@ if (cmd === "wallets") await wallets()
 else if (cmd === "fund") await fund(arg)
 else if (cmd === "seed") { await fund(arg ?? "0.05"); await seedWorld() }
 else if (cmd === "tick") await tick()
+else if (cmd === "harbour") await harbour(await world())
 else if (cmd === "loop") {
   const every = Number(arg ?? 20) * 60_000
   for (;;) { await safely("fund", () => fund()); await safely("tick", tick); await sleep(every) }

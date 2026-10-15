@@ -3,7 +3,7 @@
 import { createPublicClient, createWalletClient, ExpirationTime, jsonToPayload } from "@arkiv-network/sdk"
 import { i32, key as keyAttr, str, u64 } from "@arkiv-network/sdk/attr"
 import { tiramisu } from "@arkiv-network/sdk/chains"
-import { and, eq, gte, lt, lte } from "@arkiv-network/sdk/query"
+import { and, eq, gte, lt, lte, or } from "@arkiv-network/sdk/query"
 import { http, webSocket } from "viem"
 
 export const APP = "tideland"
@@ -18,8 +18,14 @@ export const MATERIALS = {
   pine: { label: "Pine house", seconds: 7 * 86400, flags: {}, blurb: "A week of shelter. Renew it or the tide takes it." },
   stone: { label: "Stone house", seconds: 90 * 86400, flags: {}, blurb: "A season. Costs more, outlasts most of its neighbours." },
   monument: { label: "Monument", seconds: 5 * 365 * 86400, flags: { readonly: true }, blurb: "Five years, prepaid. Its words can never be edited." },
-  lighthouse: { label: "Lighthouse", seconds: 3 * 86400, flags: { permissionlessExtension: true }, blurb: "A commons. Anyone on the coast can keep it lit." },
+  lighthouse: { label: "Lighthouse", seconds: 3 * 86400, flags: { permissionlessExtension: true }, commons: true, blurb: "A commons. Anyone on the coast can keep it lit." },
+  // The harbour's commons: short-lived, permissionless, and the targets of a Keeper Run.
+  buoy: { label: "Bell buoy", seconds: 2 * 3600, flags: { permissionlessExtension: true }, commons: true, blurb: "Rings ships home. Two hours of float unless someone patches it." },
+  jetty: { label: "Jetty", seconds: 12 * 3600, flags: { permissionlessExtension: true }, commons: true, blurb: "Everyone's boats tie up here. Nobody owns the upkeep." },
+  seawall: { label: "Sea wall", seconds: 86400, flags: { permissionlessExtension: true }, commons: true, blurb: "Holds the sea off the houses behind it, for a day at a time." },
 }
+export const BUILDABLE = ["driftwood", "pine", "stone", "monument", "lighthouse"]
+export const COMMONS = Object.keys(MATERIALS).filter((k) => MATERIALS[k].commons)
 export const PARCEL_SECONDS = 14 * 86400
 export const GUILD_SECONDS = 30 * 86400
 export const INSCRIPTION_SPANS = { day: 86400, week: 7 * 86400, month: 30 * 86400, year: 365 * 86400 }
@@ -109,6 +115,7 @@ export function toThing(e) {
     createdAt: e.createdAt,
     expiresAt: e.expiresAt,
     flags: e.creationFlags,
+    attrs: a,
     data,
   }
 }
@@ -137,8 +144,10 @@ export function layout(things) {
     c.contested = c.parcels.slice(1)
     // Only a structure on the winning parcel counts; others are squatters drawn as ghosts.
     c.structures.sort(byAge)
-    c.structure = c.structures.find((s) => c.parcel && s.parcel === c.parcel.key) ?? null
-    c.squatters = c.structures.filter((s) => s !== c.structure)
+    // Commons stand on open coast with no parcel; anything else must sit on the winning parcel.
+    const isCommons = (s) => !s.parcel && MATERIALS[s.material]?.commons
+    c.structure = c.structures.find((s) => c.parcel && s.parcel === c.parcel.key) ?? c.structures.find(isCommons) ?? null
+    c.squatters = c.structures.filter((s) => s !== c.structure && !isCommons(s))
   }
   return cells
 }
@@ -230,6 +239,49 @@ export function inscribe(wallet, { x, y, text, span }) {
     contentType: "application/json",
     expires: ExpirationTime.fromSeconds(INSCRIPTION_SPANS[span] ?? INSCRIPTION_SPANS.week),
     flags: { readonly: true },
+  })
+}
+
+// ---------- Keeper Run ----------
+
+/** One tick of patching buys this share of a commons' full span (buoy 3 min, jetty 18 min, wall 36 min, light 1.8 h). */
+export const PATCH_SHARE = 0.025
+export const patchBlocks = (material) => BigInt(Math.round((MATERIALS[material].seconds / BLOCK_SECONDS) * PATCH_SHARE))
+/** A commons can never be patched beyond its full span from now. */
+export const maxExpiry = (material, head) => head + lifetimeBlocks(MATERIALS[material].seconds)
+
+/**
+ * Seal queued patches in one atomic batch. Each entry sets an absolute target block, computed from the
+ * freshest known expiry (kept current by ExpiryExtended events), so the batch only ever moves expiries later.
+ */
+export function sealPatches(wallet, patches) {
+  return wallet.executeBatch({ extensions: patches.map((p) => ({ entityKey: p.key, expires: ExpirationTime.atBlock(p.target) })) })
+}
+
+/** A finished run. Read-only, and remembered for longer the better it was: the leaderboard decays too. */
+export const runLifetimeSeconds = (score) => Math.min(30 * 86400, Math.max(3600, Math.round(score) * 12))
+export function recordRun(wallet, { score, saved, patches, batches, maxCombo, keeper, txs }) {
+  return wallet.createEntity({
+    attributes: { ...common("run"), score: i32(Math.round(score)), saved: i32(Math.round(saved)), patches: i32(patches), keeper: str(keeper) },
+    payload: jsonToPayload({ batches, maxCombo, txs: txs.slice(0, 40) }),
+    contentType: "application/json",
+    expires: ExpirationTime.fromSeconds(runLifetimeSeconds(score) - (runLifetimeSeconds(score) % BLOCK_SECONDS)),
+    flags: { readonly: true },
+  })
+}
+export const runsQuery = (client) => client.select(FIELDS).where(base("run"))
+export const commonsQuery = (client) => client.select(FIELDS).where(base("structure"), or(COMMONS.map((m) => eq("material", m))))
+
+/** Place a commons (anyone can; the Harbour Trust bot does it on a schedule). */
+export function placeCommons(wallet, { x, y, material, name, wear = 0 }) {
+  // `wear` (0..0.85) sets it adrift already worn: its span is the most it can ever be patched up to.
+  const seconds = Math.max(600, Math.round(MATERIALS[material].seconds * (1 - wear) / BLOCK_SECONDS) * BLOCK_SECONDS)
+  return wallet.createEntity({
+    attributes: { ...common("structure"), x: i32(x), y: i32(y), material: str(material) },
+    payload: jsonToPayload({ name, note: "" }),
+    contentType: "application/json",
+    expires: ExpirationTime.fromSeconds(seconds),
+    flags: MATERIALS[material].flags,
   })
 }
 

@@ -23,6 +23,7 @@
       <span class="mono">block <b id="stat-block">–</b></span>
       <span class="sink small" id="stat-relay" hidden title="Your network's anonymous Arkiv read budget is used up, so reads go through our read-only relay.">via relay</span>
     </div>
+    <button class="storm-cta" data-run="lobby">Start a storm shift <span>90 s · keep the commons afloat</span></button>
     <div class="row">
       <button class="ghost" id="btn-how">How it works</button>
       <button class="ghost" id="btn-mirror">Read it without us</button>
@@ -54,6 +55,27 @@
     <button id="zoom-out" aria-label="Zoom out">−</button>
     <button id="zoom-fit" aria-label="Fit the coast">⤢</button>
   </div>
+
+  <section class="run-lobby card" id="run-lobby" hidden>
+    <div class="eyebrow">Keeper Run · storm shift</div>
+    <h2>Keep the commons afloat</h2>
+    <p class="note">Buoys, jetties, sea walls and lighthouses belong to nobody, so anybody can keep them alive. For 90 seconds, run between them and <b>hold</b> to patch. Patches are sealed on Arkiv in atomic batches from your own key. What nobody patches, sinks.</p>
+    <p class="note sink" id="run-danger"></p>
+    <div class="keepers" id="run-keepers"></div>
+    <p class="note small">Click or tap a commons to run there, hold to patch. Keys: WASD to move, hold Space to patch the nearest one.</p>
+    <div class="row"><button class="primary big" data-run="start">Start the shift</button><button class="ghost" data-run="cancel">Not now</button><button class="ghost small" data-run="mute">sound on</button></div>
+    <h3>Keepers remembered</h3>
+    <p class="note small">Each run is a read-only Arkiv entity that lives longer the better it was. This board decays too.</p>
+    <ol class="board" id="run-board"></ol>
+  </section>
+
+  <div class="run-hud" id="run-hud">
+    <div class="timer">1:30</div>
+    <div class="scorebox"><div class="score">0</div><div class="combo"></div></div>
+    <div class="sealbox"><div class="sealed"></div><div class="txs small"></div></div>
+  </div>
+
+  <section class="run-result card" id="run-result" hidden><div id="run-result-body"></div></section>
 
   <div class="toast" id="toast" hidden></div>
 

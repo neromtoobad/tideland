@@ -1,8 +1,8 @@
 // Isometric canvas renderer. Pure drawing: it reads the world model and never touches Arkiv.
-import { SIZE, lifeLeft, BLOCK_SECONDS } from "../../shared/tideland.js"
+import { SIZE, lifeLeft, BLOCK_SECONDS, MATERIALS, COMMONS } from "../../shared/tideland.js"
 
 const TW = 96, TH = 48 // tile diamond at zoom 1
-const SPRITES = ["driftwood", "pine", "stone", "monument", "lighthouse", "plot", "inscription",
+const SPRITES = ["driftwood", "pine", "stone", "monument", "lighthouse", "plot", "inscription", "buoy", "jetty", "seawall",
   "carpenter", "carpenter-sad", "mason", "mason-sad", "lamplighter", "lamplighter-sad"]
 const img = {}
 export const spriteUrl = (n) => `/sprites/${n}.webp`
@@ -60,8 +60,11 @@ export function draw(view, world) {
   const { ctx, dpr, zoom } = view
   const now = performance.now(), t = (now - view.t0) / 1000
   const head = world.head + BigInt(Math.floor((Date.now() - world.headAt) / 1000 / BLOCK_SECONDS))
-  const w = TW * zoom, h = TH * zoom
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  const run = view.run
+  if (run) followCamera(view, run)
+  const w = TW * view.zoom, h = TH * view.zoom
+  const shake = run ? run.shake : 0
+  ctx.setTransform(dpr, 0, 0, dpr, (Math.random() - 0.5) * shake * dpr, (Math.random() - 0.5) * shake * dpr)
 
   // sea
   const g = ctx.createLinearGradient(0, 0, 0, innerHeight)
@@ -118,7 +121,7 @@ export function draw(view, world) {
 
   // villagers: one beside each guild house; sad when it sinks within a day
   const DAY = 43200n
-  const shown = zoom < 0.45 ? [] : actors.filter((a) => a.s.expiresAt - head < DAY || parseInt(a.s.key.slice(-2), 16) % 3 === 0)
+  const shown = zoom < 0.45 || view.run ? [] : actors.filter((a) => a.s.expiresAt - head < DAY || parseInt(a.s.key.slice(-2), 16) % 3 === 0)
   for (const a of shown) {
     const sad = a.s.expiresAt - head < DAY
     const sprite = img[`${a.ch}${sad ? "-sad" : ""}`]
@@ -128,6 +131,8 @@ export function draw(view, world) {
     const bob = sad ? 0 : Math.sin(t * 3 + a.c.x) * 1.5 * zoom
     ctx.drawImage(sprite, sx + w * 0.14, sy + h * 0.95 - chh + bob, cw, chh)
   }
+
+  if (run) drawRunLayer(view, world, run, head, w, h, t, now)
 
   // splashes: rings where something just went under
   view.splashes = view.splashes.filter((p) => now - p.at < 3500)
@@ -156,11 +161,13 @@ function drawThing(ctx, name, thing, head, sx, sy, w, h, t) {
   const sw = w * 1.02, sh = sw * (sprite.naturalHeight / sprite.naturalWidth)
   // the trimmed sprite's bottom edge is the tile slab's bottom vertex; the slab is ~9% of width deep
   let bx = sx - sw / 2, by = sy + h + sw * 0.09 - sh
-  // the last six hours: it settles into the sand and the water rises around it
-  const sinking = left < 10800 ? 1 - Math.max(0, left) / 10800 : 0
+  // the last stretch of its life (6 h, or a third of a short life): it settles and the water rises around it
+  const span = Number(thing.material && MATERIALS[thing.material] ? MATERIALS[thing.material].seconds / BLOCK_SECONDS : 302400)
+  const window_ = Math.min(10800, span * 0.3)
+  const sinking = left < window_ ? 1 - Math.max(0, left) / window_ : 0
   by += sinking * sh * 0.28
   ctx.save()
-  if (frac < 0.35 || left < 43200) ctx.filter = `saturate(${0.45 + frac}) sepia(${left < 43200 ? 0.35 : 0.15})`
+  if (frac < 0.35) ctx.filter = `saturate(${0.45 + frac}) sepia(${0.15 + (0.35 - frac)})`
   if (sinking > 0) {
     ctx.beginPath(); ctx.rect(bx - 4, by - 4, sw + 8, (sy + h * 0.98) - by + 4 + sinking * sh * 0.05); ctx.clip()
   }
@@ -190,5 +197,120 @@ function drawBeam(ctx, s, head, sx, sy, w, t) {
   ctx.beginPath(); ctx.moveTo(lx, ly)
   ctx.arc(lx, ly, w * 1.15, ang - 0.22, ang + 0.22); ctx.closePath(); ctx.fill()
   ctx.beginPath(); ctx.arc(lx, ly, w * 0.12, 0, Math.PI * 2); ctx.fill()
+  ctx.restore()
+}
+
+// ---------------- Keeper Run layer ----------------
+
+function followCamera(view, run) {
+  const zt = innerWidth < 760 ? 1.15 : 1.55
+  view.zoom += (zt - view.zoom) * 0.06
+  const tx = innerWidth / 2 - (run.pos.x - run.pos.y) * (TW / 2) * view.zoom
+  const ty = innerHeight * 0.56 - (run.pos.x + run.pos.y) * (TH / 2) * view.zoom
+  view.ox += (tx - view.ox) * 0.1; view.oy += (ty - view.oy) * 0.1
+}
+
+function drawRunLayer(view, world, run, head, w, h, t, now) {
+  const { ctx } = view
+  // storm surges: a foam front rolling in from the open sea (the far x / y edges)
+  for (const wave of run.waves) {
+    const p = (now - wave.at) / 2600, k = 64 - p * 30 // diagonal x + y = k
+    const a = view.toScreen(Math.min(32, k), Math.max(0, k - 32)), b = view.toScreen(Math.max(0, k - 32), Math.min(32, k))
+    ctx.save()
+    ctx.globalAlpha = Math.sin(Math.PI * Math.min(1, p)) * 0.9
+    ctx.strokeStyle = "rgba(255,255,255,.95)"; ctx.lineWidth = 7 * view.zoom; ctx.lineCap = "round"
+    ctx.beginPath(); ctx.moveTo(a.sx, a.sy); ctx.lineTo(b.sx, b.sy); ctx.stroke()
+    ctx.strokeStyle = "rgba(127,183,174,.5)"; ctx.lineWidth = 22 * view.zoom
+    ctx.beginPath(); ctx.moveTo(a.sx, a.sy + 12 * view.zoom); ctx.lineTo(b.sx, b.sy + 12 * view.zoom); ctx.stroke()
+    ctx.restore()
+  }
+
+  // ring timers over every live commons: the real remaining life, optimistic while a patch is sealing
+  for (const c of world.cells.values()) {
+    const s = c.structure
+    if (!s || !COMMONS.includes(s.material)) continue
+    const exp = run.optimistic.get(s.key) > s.expiresAt ? run.optimistic.get(s.key) : s.expiresAt
+    if (exp <= head) continue
+    const span = Number(MATERIALS[s.material].seconds / BLOCK_SECONDS), left = Number(exp - head), frac = Math.min(1, left / span)
+    const { sx, sy } = view.toScreen(s.x, s.y)
+    const cx = sx, cy = sy - h * 1.15, r = 13 * view.zoom
+    const col = frac < 0.12 ? "#b4552e" : frac < 0.4 ? "#c9922e" : "#1f6e68"
+    const pulse = frac < 0.12 ? 1 + 0.12 * Math.sin(t * 10) : 1
+    ctx.save()
+    ctx.fillStyle = "rgba(251,252,250,.92)"; ctx.beginPath(); ctx.arc(cx, cy, r * 1.25 * pulse, 0, Math.PI * 2); ctx.fill()
+    ctx.strokeStyle = "rgba(27,43,42,.12)"; ctx.lineWidth = 4 * view.zoom; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke()
+    ctx.strokeStyle = col; ctx.beginPath(); ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac); ctx.stroke()
+    const mins = left * BLOCK_SECONDS / 60
+    ctx.fillStyle = col; ctx.font = `600 ${Math.round(9.5 * view.zoom)}px "IBM Plex Mono", monospace`; ctx.textAlign = "center"; ctx.textBaseline = "middle"
+    ctx.fillText(mins < 60 ? `${Math.ceil(mins)}m` : mins < 1440 ? `${Math.round(mins / 60)}h` : `${Math.round(mins / 1440)}d`, cx, cy + 0.5)
+    if (s.key === run.target) { ctx.strokeStyle = "#1f6e68"; ctx.lineWidth = 2.5; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(cx, cy, r * 1.7, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]) }
+    ctx.restore()
+  }
+
+  // the keeper
+  const sad = now < run.sadUntil
+  const sprite = img[`${run.keeper}${sad ? "-sad" : ""}`]
+  if (sprite?.complete) {
+    const { sx, sy } = view.toScreen(run.pos.x, run.pos.y)
+    const cw = w * 0.6, chh = cw * (sprite.naturalHeight / sprite.naturalWidth)
+    const moving = !!run.goal || Object.values(run.keys).some(Boolean)
+    const hop = moving ? Math.abs(Math.sin(t * 14)) * 6 * view.zoom : 0
+    const squash = run.patchingNow ? 1 - 0.08 * Math.abs(Math.sin(t * 30)) : 1
+    ctx.save()
+    ctx.fillStyle = "rgba(27,43,42,.18)"; ctx.beginPath(); ctx.ellipse(sx, sy + h * 0.5, cw * 0.35, cw * 0.12, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.translate(sx, sy + h * 0.5 - hop); ctx.scale(run.facing < 0 ? -1 : 1, squash)
+    ctx.drawImage(sprite, -cw / 2, -chh, cw, chh)
+    ctx.restore()
+  }
+
+  // particles and floating numbers
+  for (const p of run.particles) {
+    const a = view.toScreen(p.gx, p.gy)
+    ctx.fillStyle = p.color; ctx.globalAlpha = 1 - (now - p.at) / 700
+    ctx.fillRect(a.sx + p.x, a.sy + p.y, p.r, p.r); ctx.globalAlpha = 1
+  }
+  for (const f of run.floaters) {
+    const k = (now - f.at) / (1100 * f.life), a = view.toScreen(f.gx, f.gy)
+    ctx.save(); ctx.globalAlpha = 1 - k
+    ctx.font = `700 ${Math.round((f.text === "CLUTCH" ? 20 : 15) * Math.min(1.4, view.zoom))}px "Albert Sans", sans-serif`; ctx.textAlign = "center"
+    ctx.lineWidth = 4; ctx.strokeStyle = "rgba(251,252,250,.95)"; ctx.strokeText(f.text, a.sx + f.dx, a.sy + f.dy - k * 40)
+    ctx.fillStyle = f.color; ctx.fillText(f.text, a.sx + f.dx, a.sy + f.dy - k * 40); ctx.restore()
+  }
+
+  // danger compass: arrows at the screen edge toward commons about to go under
+  for (const c of world.cells.values()) {
+    const s = c.structure
+    if (!s || !COMMONS.includes(s.material)) continue
+    const exp = run.optimistic.get(s.key) > s.expiresAt ? run.optimistic.get(s.key) : s.expiresAt
+    const frac = Number(exp - head) / Number(MATERIALS[s.material].seconds / BLOCK_SECONDS)
+    if (exp <= head || frac > 0.15) continue
+    const { sx, sy } = view.toScreen(s.x + 0.5, s.y + 0.5)
+    if (sx > 40 && sx < innerWidth - 40 && sy > 90 && sy < innerHeight - 40) continue
+    const cx = innerWidth / 2, cy = innerHeight / 2, ang = Math.atan2(sy - cy, sx - cx)
+    const ex = Math.max(28, Math.min(innerWidth - 28, cx + Math.cos(ang) * innerWidth)), ey = Math.max(96, Math.min(innerHeight - 28, cy + Math.sin(ang) * innerHeight))
+    ctx.save(); ctx.translate(ex, ey); ctx.rotate(ang)
+    ctx.globalAlpha = 0.7 + 0.3 * Math.sin(t * 8)
+    ctx.fillStyle = "#b4552e"; ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(-8, -10); ctx.lineTo(-8, 10); ctx.closePath(); ctx.fill()
+    ctx.restore()
+  }
+
+  // opening banner
+  if (run.banner && now - run.banner < 2200) {
+    const k = (now - run.banner) / 2200
+    ctx.save(); ctx.globalAlpha = k < 0.15 ? k / 0.15 : k > 0.75 ? (1 - k) / 0.25 : 1
+    ctx.textAlign = "center"; ctx.fillStyle = "#1b2b2a"
+    ctx.font = `400 ${Math.min(64, innerWidth / 9)}px "Instrument Serif", serif`; ctx.fillText("Storm shift", innerWidth / 2, innerHeight * 0.32)
+    ctx.font = `600 15px "IBM Plex Mono", monospace`; ctx.fillStyle = "#b4552e"; ctx.fillText("keep the commons afloat", innerWidth / 2, innerHeight * 0.32 + 30)
+    ctx.restore()
+  }
+
+  // storm light: a cool tint and rain
+  ctx.save()
+  ctx.fillStyle = "rgba(31,58,72,.10)"; ctx.fillRect(0, 0, innerWidth, innerHeight)
+  ctx.strokeStyle = "rgba(255,255,255,.35)"; ctx.lineWidth = 1
+  for (let i = 0; i < 90; i++) {
+    const x = ((i * 137 + t * 380) % (innerWidth + 200)) - 100, y = ((i * 89 + t * 900) % (innerHeight + 60)) - 30
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 6, y + 16); ctx.stroke()
+  }
   ctx.restore()
 }
