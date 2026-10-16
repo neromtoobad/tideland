@@ -124,7 +124,7 @@ export async function visit(wallet, reader, args) {
   try { return await visitOnce(wallet, reader, args) } catch (e) {
     // someone else shored the house up first: our target would shorten it, so the whole batch reverted
     // (no false visit, meal or signature). Re-read its expiry and stack our time on top, once.
-    if (!/shorten/i.test(String(e?.message))) throw e
+    if (!/shorten/i.test(`${e?.shortMessage} ${e?.message} ${e?.details}`)) throw e
     return visitOnce(wallet, reader, { ...args, home: toThing(await reader.getEntity(args.home.key)) })
   }
 }
@@ -240,7 +240,7 @@ export async function keepAfloat(wallet, reader, { home, addBlocks, note }) {
       const r = await tendHome(wallet, { home, target, minutes, note })
       return { ...r, target, minutes }
     } catch (e) {
-      if (attempt > 0 || !/shorten/i.test(String(e.message))) throw e
+      if (attempt > 0 || !/shorten/i.test(`${e?.shortMessage} ${e?.message} ${e?.details}`)) throw e
       home = toThing(await reader.getEntity(home.key))
     }
   }
