@@ -6,6 +6,7 @@ import { COMMONS, SIZE, PRESENCE_SECONDS, SAY_SECONDS, createPresence, movePrese
 import { spriteUrl } from "./render.js"
 import { poseSprite } from "./house.js"
 import { sfx } from "./sfx.js"
+import { celebrate } from "./celebrate.js"
 
 const SPEED = 3.6 // cells per second: a stroll, not a sprint
 const SYNC_AFTER_MS = 1100
@@ -127,14 +128,61 @@ export function createWalk(deps) {
 
   // ---------- HUD, action button, chat ----------
 
+  // ---------- the day: four things to do, always one clear next step ----------
+
+  /** The neighbour in the most trouble right now (house going under first, then hungry or lonely). */
+  function neediest() {
+    const h = head()
+    const homes = [...state.things.values()].filter((t) => t.kind === "home" && t.expiresAt > h && t.key !== me.home?.key)
+    const score = (x) => { const m = state.moods?.get(x.key); return Number(x.expiresAt - h) - (m === "hungry" || m === "sad" ? 20000 : 0) }
+    return homes.sort((a, b) => score(a) - score(b))[0]
+  }
+  const helpedToday = () => [...state.things.values()].some((t) => t.kind === "visit" && same(t.creator, state.wallet?.address) && t.home !== me.home?.key && t.expiresAt > head())
+
+  function tasks() {
+    const n = myNeeds(), name = esc(me.home.data.islander || "your islander"), who = neediest()
+    const left = who ? who.expiresAt - head() : 0n
+    return [
+      { id: "fish", icon: "🎣", done: n.food > 0, label: "Catch a fish", hint: "Walk to the shore and hold to fish" },
+      { id: "sleep", icon: "😴", done: n.rest > 0, label: `Put ${name} to bed`, hint: "Walk home and tap Sleep" },
+      { id: "friend", icon: "🤝", done: n.friends > 0, label: "Get a friend to visit", hint: "Only other people can do this: send your link" },
+      { id: "help", icon: "🛟", done: helpedToday(), label: who ? `Help ${esc(who.data.islander || who.data.name)}` : "Help a neighbour",
+        hint: who ? `${left < 21600n ? `House floods in ${blocksToText(left)}` : ({ hungry: "Hungry", sad: "Lonely", sleepy: "Exhausted" }[state.moods?.get(who.key)] ?? "Could use a visit")}. Go visit` : "Visit someone", key: who?.key },
+    ]
+  }
+
+  /** Where the map arrow points: the first unfinished task you can walk to. */
+  function target() {
+    const t = tasks().find((x) => !x.done && x.id !== "friend")
+    if (!t) return null
+    if (t.id === "fish") return { ...shore(), label: "Fish here" }
+    if (t.id === "sleep") return { x: me.home.x + 0.5, y: me.home.y + 0.5, label: "Home" }
+    if (t.id === "help" && t.key) { const h = state.things.get(t.key); return h ? { x: h.x + 0.5, y: h.y + 0.5, label: "Help" } : null }
+    return null
+  }
+  const shore = () => { const a = { x: 29.4, y: me.pos.y }, b = { x: me.pos.x, y: 29.4 }; return Math.hypot(a.x - me.pos.x, a.y - me.pos.y) < Math.hypot(b.x - me.pos.x, b.y - me.pos.y) ? a : b }
+
+  function go(id) {
+    const t = tasks().find((x) => x.id === id); if (!t) return
+    if (id === "fish") { me.goal = shore(); me.openOnArrival = null }
+    else if (id === "sleep") { me.goal = { x: Math.min(31.5, me.home.x + 1.2), y: Math.min(31.5, me.home.y + 1.2) }; me.openOnArrival = null }
+    else if (id === "friend") house.open(me.home.key, { panel: true })
+    else if (id === "help" && t.key) { const h = state.things.get(t.key); me.goal = { x: Math.min(31.5, h.x + 1.2), y: Math.min(31.5, h.y + 1.2) }; me.openOnArrival = t.key }
+  }
+
+  let celebrated = (() => { try { return localStorage.getItem("tideland.dayDone") } catch { return null } })()
   function renderHud() {
     if (!me.active || !me.home) return
-    const n = myNeeds(), h = me.home
-    $("me-hud").innerHTML = `<button class="me-face" data-walk="mine"><img src="${spriteUrl(poseSprite(h.look, n.mood))}" alt="" /></button>
-      <div class="me-info"><b>${esc(h.data.islander || "You")}</b>
-        <div class="minibars">${[["🍲", n.food], ["😴", n.rest], ["🤝", n.friends], ["🏠", n.home]].map(([e, f]) => `<span title="${e}"><i>${e}</i><em><u style="width:${(f * 100).toFixed(0)}%" class="${f < 0.15 ? "low" : ""}"></u></em></span>`).join("")}</div></div>`
+    const n = myNeeds(), h = me.home, list = tasks(), done = list.filter((t) => t.done).length
+    const first = list.find((t) => !t.done)
+    $("me-hud").innerHTML = `<div class="day-head"><button class="me-face" data-walk="mine"><img src="${spriteUrl(poseSprite(h.look, n.mood))}" alt="" /></button>
+        <div><b>${esc(h.data.islander || "Your")}'s day</b><span>${done} of 4 done · house sinks in ${blocksToText(h.expiresAt - head())}</span></div></div>
+      <ol class="day">${list.map((t) => `<li class="${t.done ? "done" : t === first ? "next" : ""}" data-task="${t.id}"><i>${t.done ? "✓" : t.icon}</i><div><b>${t.label}</b>${t.done ? "" : `<span>${t.hint}</span>`}</div>${t.done ? "" : `<em>›</em>`}</li>`).join("")}</ol>`
+    const today = new Date().toDateString()
+    if (done === 4 && celebrated !== today) { celebrated = today; try { localStorage.setItem("tideland.dayDone", today) } catch {}; celebrate(`${esc(h.data.islander)} had a good day ✨`, "Fed, rested, visited, and kind to a neighbour. Come back tomorrow: the tide doesn't stop.") }
   }
-  setInterval(renderHud, 5000)
+  setInterval(renderHud, 4000)
+  document.addEventListener("click", (e) => { const t = e.target.closest("[data-task]"); if (t) go(t.dataset.task) })
 
   let lastAction = ""
   function renderAction() {
@@ -156,7 +204,7 @@ export function createWalk(deps) {
       toast("😴 Going to bed…", 0)
       const r = await sleep(w.client, { home: me.home })
       state.things.set(r.entityKey, { key: r.entityKey, kind: "sleep", home: me.home.key, creator: w.address, owner: w.address, createdAt: head(), expiresAt: head() + lifetimeBlocks(NEEDS.rest.seconds), data: {} })
-      sfx.bell(); toast(`Goodnight. Rested for 12 hours. <a href="${explorer}/tx/${r.txHash}" target="_blank" rel="noopener">receipt</a>`, 5000); renderHud()
+      renderHud(); sfx.bell(); toast(`Goodnight. Rested for 12 hours. <a href="${explorer}/tx/${r.txHash}" target="_blank" rel="noopener">receipt</a>`, 5000); renderHud()
     } catch (e) { toast(`Couldn't sleep: ${esc(String(e.shortMessage || e.message).slice(0, 100))}`, 5000) }
   }
 
@@ -175,7 +223,7 @@ export function createWalk(deps) {
       toast(`🐟 Cooking ${dish}…`, 0)
       const r = await fish(w.client, { home: me.home, dish })
       state.things.set(r.entityKey, { key: r.entityKey, kind: "meal", home: me.home.key, creator: w.address, owner: w.address, createdAt: head(), expiresAt: head() + lifetimeBlocks(NEEDS.food.seconds), data: { dish } })
-      sfx.bell(); toast(`Caught ${dish}. Full for 8 hours. <a href="${explorer}/tx/${r.txHash}" target="_blank" rel="noopener">receipt</a>`, 5000); renderHud()
+      renderHud(); sfx.bell(); toast(`Caught ${dish}. Full for 8 hours. <a href="${explorer}/tx/${r.txHash}" target="_blank" rel="noopener">receipt</a>`, 5000); renderHud()
     } catch (e) { toast(`Couldn't cook: ${esc(String(e.shortMessage || e.message).slice(0, 100))}`, 5000) }
   }
 
@@ -227,8 +275,8 @@ export function createWalk(deps) {
     const says = new Map()
     for (const t of state.things.values()) if (t.kind === "say" && t.expiresAt > h) { const prev = says.get(t.home); if (!prev || prev.createdAt < t.createdAt) says.set(t.home, t) }
     const others = presences().map((p) => ({ key: p.key, home: p.home, look: p.look, name: p.data?.name, pos: smooth.get(p.key) ?? { x: p.x + 0.5, y: p.y + 0.5 }, mood: state.moods?.get(p.home) }))
-    return { me: { ...me, mood: me.home ? myNeeds().mood : "happy", name: me.home?.data?.islander }, others, says }
+    return { me: { ...me, mood: me.home ? myNeeds().mood : "happy", name: me.home?.data?.islander }, others, says, target: target() }
   }
 
-  return { start, stop, update, pointerDown, key, scene, renderHud, get active() { return me.active }, get me() { return me } }
+  return { start, stop, update, pointerDown, key, scene, renderHud, go, get active() { return me.active }, get me() { return me } }
 }

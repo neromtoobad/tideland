@@ -356,7 +356,7 @@ function drawRunLayer(view, world, run, head, w, h, t, now) {
 // ---------------- Play mode: islanders walking about ----------------
 
 function followMe(view, me) {
-  const zt = innerWidth < 760 ? 1.05 : 1.3
+  const zt = innerWidth < 760 ? 1.3 : 1.75
   view.zoom += (zt - view.zoom) * 0.05
   const tx = innerWidth / 2 - (me.pos.x - me.pos.y) * (TW / 2) * view.zoom
   const ty = innerHeight * 0.58 - (me.pos.x + me.pos.y) * (TH / 2) * view.zoom
@@ -367,15 +367,29 @@ const SUFFIX = { happy: "", hungry: "-hungry", sleepy: "-sleepy", sad: "-sad", s
 
 function drawWalkers(view, scene, w, h, t) {
   const { ctx } = view
+  // the next thing to do: a bouncing pin where to go
+  if (scene.target) {
+    const { sx, sy } = view.toScreen(scene.target.x, scene.target.y)
+    const bob = Math.abs(Math.sin(t * 3)) * 10 * view.zoom, py = sy - h * 1.5 - bob
+    ctx.save()
+    ctx.fillStyle = "rgba(31,110,104,.18)"; ctx.beginPath(); ctx.ellipse(sx, sy, w * 0.35 * (1 - bob / 40), h * 0.3 * (1 - bob / 40), 0, 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = "#1f6e68"; ctx.beginPath(); ctx.arc(sx, py, 13 * view.zoom, Math.PI, 0); ctx.lineTo(sx, py + 22 * view.zoom); ctx.closePath(); ctx.fill()
+    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(sx, py, 5 * view.zoom, 0, Math.PI * 2); ctx.fill()
+    ctx.font = `700 ${Math.round(11 * view.zoom)}px "Albert Sans", sans-serif`; ctx.textAlign = "center"
+    const lw = ctx.measureText(scene.target.label).width + 14
+    ctx.fillStyle = "#1f6e68"; roundRect(ctx, sx - lw / 2, py - 36 * view.zoom, lw, 18 * view.zoom, 9 * view.zoom); ctx.fill()
+    ctx.fillStyle = "#fff"; ctx.textBaseline = "middle"; ctx.fillText(scene.target.label, sx, py - 27 * view.zoom)
+    ctx.restore()
+  }
   const all = [...scene.others.map((o) => ({ ...o, mine: false })), { home: scene.me.home?.key, look: scene.me.home?.look, name: scene.me.name, pos: scene.me.pos, mood: scene.me.mood, facing: scene.me.facing, moving: scene.me.moving, mine: true, fishing: !!scene.me.fishing }]
   all.sort((a, b) => (a.pos.x + a.pos.y) - (b.pos.x + b.pos.y))
   for (const a of all) {
     const moving = a.mine ? a.moving : a.pos.moving
-    const mood = moving ? "happy" : a.mood === "sleeping" ? "sleepy" : a.mood || "happy"
+    const mood = moving ? "happy" : a.mood || "happy"
     const sprite = img[`${a.look || "carpenter"}${SUFFIX[mood] ?? ""}`] || img[a.look || "carpenter"]
     if (!sprite?.complete || !sprite.naturalWidth) continue
     const { sx, sy } = view.toScreen(a.pos.x, a.pos.y)
-    const cw = w * (a.mine ? 0.5 : 0.44), chh = cw * (sprite.naturalHeight / sprite.naturalWidth)
+    const cw = w * (a.mine ? 0.64 : 0.54), chh = cw * (sprite.naturalHeight / sprite.naturalWidth)
     const hop = moving ? Math.abs(Math.sin(t * 11 + (a.pos.x || 0))) * 5 * view.zoom : 0
     ctx.save()
     ctx.fillStyle = "rgba(27,43,42,.2)"; ctx.beginPath(); ctx.ellipse(sx, sy, cw * 0.3, cw * 0.1, 0, 0, Math.PI * 2); ctx.fill()
@@ -383,8 +397,9 @@ function drawWalkers(view, scene, w, h, t) {
     ctx.translate(sx, sy - hop); ctx.scale(((a.mine ? a.facing : a.pos.facing) ?? 1) < 0 ? -1 : 1, 1)
     ctx.drawImage(sprite, -cw / 2, -chh, cw, chh)
     ctx.restore()
-    // name tag
-    if (a.name) {
+    // name tag: you always; others only when they're near you, to keep the screen calm
+    const near = a.mine || Math.hypot(a.pos.x - scene.me.pos.x, a.pos.y - scene.me.pos.y) < 6
+    if (a.name && near) {
       ctx.save()
       ctx.font = `600 ${Math.round(10.5 * Math.min(1.3, view.zoom))}px "Albert Sans", sans-serif`; ctx.textAlign = "center"
       const tw = ctx.measureText(a.name).width + 12, ty = sy + 14 * view.zoom
@@ -434,7 +449,7 @@ export const isSand = (x, y) => Math.min(x, y, SIZE - 1 - x, SIZE - 1 - y) < 2 +
 function drawDecor(ctx, x, y, sx, sy, w, h, t) {
   const r = hash(x + 101, y + 7)
   const sand = isSand(x, y)
-  if (r > (sand ? 0.1 : 0.17)) return
+  if (r > (sand ? 0.06 : 0.1)) return
   const pick = hash(x + 3, y + 911)
   const name = sand ? (pick < 0.45 ? "deco-grass" : pick < 0.8 ? "deco-palm" : "deco-rocks")
     : (pick < 0.32 ? "deco-pines" : pick < 0.52 ? "deco-flowers" : pick < 0.7 ? "deco-rocks" : pick < 0.84 ? "deco-palm" : pick < 0.93 ? "deco-grass" : "deco-bench")

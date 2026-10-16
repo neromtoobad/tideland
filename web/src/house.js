@@ -7,6 +7,7 @@ import {
 } from "../../shared/tideland.js"
 import { spriteUrl } from "./render.js"
 import { sfx } from "./sfx.js"
+import { celebrate } from "./celebrate.js"
 
 const HOLD_TICK_MS = 120
 const HOLD_TICK_MINUTES = 8
@@ -269,6 +270,8 @@ export function createHouse(deps) {
       if (r.minutes) cur.life.unshift({ kind: "tend", creator: me, createdAt: now, expiresAt: now + 1000n, attrs: { minutes: Math.round(r.minutes) }, data: { note }, home: cur.key })
       cur.saved = `<span class="saved">${esc(name(cur.home))} is glad you came${dish ? ` (and ate the ${esc(dish)})` : ""}${r.minutes ? `. You shored up the house <b>+${fmtMin(Math.round(r.minutes))}</b>` : ""}. <a href="${explorer}/tx/${r.txHash}" target="_blank" rel="noopener">receipt</a></span>`
       cur.dish = DISHES[Math.floor(Math.random() * DISHES.length)]
+      if (r.minutes) celebrate(`You saved ${esc(name(cur.home))}'s house!`, `+${fmtMin(Math.round(r.minutes))} above the tide${dish ? `, a warm ${esc(dish)}` : ""}, and your name in the book.`)
+      else celebrate(`${esc(name(cur.home))} is glad you came`, `You signed the book${dish ? ` and brought ${esc(dish)}` : ""}. Hold the button next time to shore up the house too.`)
       reloadSoon(); refresh().catch(() => {})
     } catch (e) {
       cur.saved = `That didn't go through: ${esc(String(e.shortMessage || e.message).slice(0, 120))}. Try again.`
