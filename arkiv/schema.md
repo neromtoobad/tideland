@@ -14,7 +14,7 @@ draws the same world. Our web client is one implementation; [`cli/tide.mjs`](../
 |---|---|---|---|
 | `app` | `str` | `"tideland"` | Namespace filter, every query starts with it |
 | `world` | `str` | `"s1"` (season) | A new season is a new world without touching old data |
-| `kind` | `str` | `home` · `meal` · `sleep` · `visit` · `presence` · `say` · `tend` · `parcel` · `structure` · `inscription` · `guild` · `run` | Type filter |
+| `kind` | `str` | `home` · `meal` · `sleep` · `visit` · `sign` · `presence` · `say` · `tend` · `parcel` · `structure` · `inscription` · `guild` · `run` | Type filter |
 
 Coordinates are **numbers** so regions are range queries: `x` and `y` are `i32` in `0..31`.
 
@@ -56,6 +56,25 @@ which is what makes the hand-over possible in one transaction.
 
 Homes built before islanders existed were **patched in place** (`patchEntity` setting `look` and the islander's name):
 homes are deliberately not `readonly`.
+
+### The goal: signatures and house levels
+
+Every visit's batch also creates a **`sign`** (attrs `home key`; payload `note`; **30 days**; `readonly`): a line in the
+house's book whose `$creator` is the visitor. Distinct signers (never the owner) earn levels, and each level holds longer:
+
+| Level (`style`) | Signers needed | The house can hold |
+|---|---|---|
+| `driftwood` (Driftwood shack, everyone starts here) | 0 | 2 days |
+| `pine` (Pine cottage) | 3 | 3 days |
+| `stone` (Stone house) | 6 | 5 days |
+| `lighthouse` (Lighthouse home) | 10 | 7 days |
+
+Upgrading is a **`patchEntity`** that sets the home's `style`. The engine doesn't know the rule, so any client checks
+the claim: earned level = f(number of distinct `sign` creators for that home); a home that claims more than it earned is
+shown as **unverified**. Signatures expire after 30 days, so a house has to stay loved to stay big.
+
+The island board is two queries over live entities: most loved (distinct signers per home) and longest afloat
+(`head − $createdAt` of each live home).
 
 ### The live layer: `presence` and `say`
 

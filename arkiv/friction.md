@@ -59,6 +59,21 @@ and read `arkiv-cost`.
 and a slow 5-minute safety refresh. Browsers read Arkiv directly and fall back to a read-only relay (with our key) only
 when *their* anonymous budget is exhausted; the page says "via relay" when that happens.
 
+## 2b. A second rejection shape: JSON-RPC `-32005` on cursor pages
+
+**Surface:** `arkiv_query` pagination (`QueryResult.next()`).
+
+**Expected:** the same 429 / budget signal as item 1, or a page.
+
+**Actual (16 Oct, world of ~220 entities, 2 pages):** intermittently the second page came back as
+`QueryError: Query rejected (cursor, -32005): Request exceeds defined limit`, both on the anonymous endpoint and once
+through our keyed relay right after a burst of parallel reads. The same query a few seconds later succeeded (219
+entities in 2 pages, keyed). We could not tell from the error whether a budget, a rate limit, or a cursor limit was hit.
+
+**What would fix it:** document `-32005` (what limit, and whether to retry), and give it a distinct `QueryError` kind
+instead of `cursor`. **Workaround:** [`collect()`](../shared/tideland.js) retries `-32005` with a short backoff, reads run
+one after another instead of in parallel, and the page treats `-32005` like a 429 when choosing the relay.
+
 ## 3. `predictEntityKeys` is not on the wallet client
 
 **Surface:** `createWalletClient` actions.

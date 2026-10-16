@@ -46,6 +46,7 @@ writes, and [`api/rpc.js`](api/rpc.js), a read-only relay the client uses only i
 
 | Feature | What the player sees | Code |
 |---|---|---|
+| **Verifiable progression** | Visits leave 30-day signatures; distinct signers level a house up (shack → cottage → stone → lighthouse, holding 2 → 7 days). Upgrading is a `patchEntity`; every client checks the claimed level against the signatures' `$creator`s and flags an overclaim. | [`levelBlock()`](web/src/house.js), [`LEVELS`](shared/tideland.js) |
 | **Presence as a lease** | Your islander's position is a 10-minute entity, patched and extended in one batch when you stop walking; close the tab and you fade from the square. | [`movePresence()`](shared/tideland.js), [`walk.js`](web/src/walk.js) |
 | **60-second speech** | Chat bubbles are entities that live one minute: the conversation literally evaporates. | [`say()`](shared/tideland.js) |
 | **The live layer is a range query** | While walking, socket events re-read only `$expiresAt < now + 1 h`, which is exactly the presence and speech. | [`nowQuery`](shared/tideland.js) |
