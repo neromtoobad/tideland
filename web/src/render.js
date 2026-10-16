@@ -64,6 +64,8 @@ export function draw(view, world) {
   const head = world.head + BigInt(Math.floor((Date.now() - world.headAt) / 1000 / BLOCK_SECONDS))
   const run = view.run
   if (run) followCamera(view, run)
+  const scene = world.scene
+  if (scene && !run) followMe(view, scene.me)
   const w = TW * view.zoom, h = TH * view.zoom
   const shake = run ? run.shake : 0
   ctx.setTransform(dpr, 0, 0, dpr, (Math.random() - 0.5) * shake * dpr, (Math.random() - 0.5) * shake * dpr)
@@ -136,6 +138,7 @@ export function draw(view, world) {
   }
 
   if (run) drawRunLayer(view, world, run, head, w, h, t, now)
+  if (scene && !run) drawWalkers(view, scene, w, h, t)
 
   // splashes: rings where something just went under
   view.splashes = view.splashes.filter((p) => now - p.at < 3500)
@@ -149,9 +152,11 @@ export function draw(view, world) {
   }
 
   // islanders: each one beside their home, pose and bubble from their needs, pottering about a little
+  const walking = new Set(scene ? [scene.me.home?.key, ...scene.others.map((o) => o.home)] : [])
   if (zoom >= 0.45 && !view.run) {
     const BUBBLE = { hungry: "🍲", sleepy: "💤", sad: "💧", sleeping: "💤", eating: "😋", waving: "👋" }
     for (const { c, s, mood } of islanders) {
+      if (walking.has(s.key)) continue // out and about: drawn where they actually are
       const suffix = { happy: "", hungry: "-hungry", sleepy: "-sleepy", sad: "-sad", sleeping: "-sleeping", eating: "-eating", waving: "-waving" }[mood] ?? ""
       const sprite = img[`${s.look || "carpenter"}${suffix}`]
       if (!sprite?.complete || !sprite.naturalWidth) continue
@@ -340,4 +345,72 @@ function drawRunLayer(view, world, run, head, w, h, t, now) {
     ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 6, y + 16); ctx.stroke()
   }
   ctx.restore()
+}
+
+// ---------------- Play mode: islanders walking about ----------------
+
+function followMe(view, me) {
+  const zt = innerWidth < 760 ? 1.05 : 1.3
+  view.zoom += (zt - view.zoom) * 0.05
+  const tx = innerWidth / 2 - (me.pos.x - me.pos.y) * (TW / 2) * view.zoom
+  const ty = innerHeight * 0.58 - (me.pos.x + me.pos.y) * (TH / 2) * view.zoom
+  view.ox += (tx - view.ox) * 0.08; view.oy += (ty - view.oy) * 0.08
+}
+
+const SUFFIX = { happy: "", hungry: "-hungry", sleepy: "-sleepy", sad: "-sad", sleeping: "-sleeping", eating: "-eating", waving: "-waving" }
+
+function drawWalkers(view, scene, w, h, t) {
+  const { ctx } = view
+  const all = [...scene.others.map((o) => ({ ...o, mine: false })), { home: scene.me.home?.key, look: scene.me.home?.look, name: scene.me.name, pos: scene.me.pos, mood: scene.me.mood, facing: scene.me.facing, moving: scene.me.moving, mine: true, fishing: !!scene.me.fishing }]
+  all.sort((a, b) => (a.pos.x + a.pos.y) - (b.pos.x + b.pos.y))
+  for (const a of all) {
+    const moving = a.mine ? a.moving : a.pos.moving
+    const mood = moving ? "happy" : a.mood === "sleeping" ? "sleepy" : a.mood || "happy"
+    const sprite = img[`${a.look || "carpenter"}${SUFFIX[mood] ?? ""}`] || img[a.look || "carpenter"]
+    if (!sprite?.complete || !sprite.naturalWidth) continue
+    const { sx, sy } = view.toScreen(a.pos.x, a.pos.y)
+    const cw = w * (a.mine ? 0.5 : 0.44), chh = cw * (sprite.naturalHeight / sprite.naturalWidth)
+    const hop = moving ? Math.abs(Math.sin(t * 11 + (a.pos.x || 0))) * 5 * view.zoom : 0
+    ctx.save()
+    ctx.fillStyle = "rgba(27,43,42,.2)"; ctx.beginPath(); ctx.ellipse(sx, sy, cw * 0.3, cw * 0.1, 0, 0, Math.PI * 2); ctx.fill()
+    if (a.mine) { ctx.strokeStyle = "rgba(31,110,104,.55)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(sx, sy, cw * 0.42, cw * 0.15, 0, 0, Math.PI * 2); ctx.stroke() }
+    ctx.translate(sx, sy - hop); ctx.scale(((a.mine ? a.facing : a.pos.facing) ?? 1) < 0 ? -1 : 1, 1)
+    ctx.drawImage(sprite, -cw / 2, -chh, cw, chh)
+    ctx.restore()
+    // name tag
+    if (a.name) {
+      ctx.save()
+      ctx.font = `600 ${Math.round(10.5 * Math.min(1.3, view.zoom))}px "Albert Sans", sans-serif`; ctx.textAlign = "center"
+      const tw = ctx.measureText(a.name).width + 12, ty = sy + 14 * view.zoom
+      ctx.fillStyle = a.mine ? "rgba(31,110,104,.92)" : "rgba(251,252,250,.92)"
+      roundRect(ctx, sx - tw / 2, ty - 10, tw, 16, 8); ctx.fill()
+      ctx.fillStyle = a.mine ? "#fff" : "#1b2b2a"; ctx.fillText(a.name, sx, ty + 2)
+      ctx.restore()
+    }
+    // speech bubble: lives exactly as long as its 60-second entity
+    const said = scene.says.get(a.home)
+    if (said) drawSpeech(ctx, sx, sy - chh - hop - 8, said.data.text || "", view.zoom)
+  }
+}
+
+function drawSpeech(ctx, x, y, text, zoom) {
+  ctx.save()
+  const fs = Math.round(12.5 * Math.min(1.25, Math.max(0.85, zoom)))
+  ctx.font = `500 ${fs}px "Albert Sans", sans-serif`
+  const words = text.split(" "), lines = []
+  let line = ""
+  for (const wd of words) { const tryLine = line ? line + " " + wd : wd; if (ctx.measureText(tryLine).width > 170 && line) { lines.push(line); line = wd } else line = tryLine }
+  if (line) lines.push(line)
+  const bw = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 18, bh = lines.length * (fs + 3) + 12
+  const bx = x - bw / 2, by = y - bh - 8
+  ctx.fillStyle = "#fff"; ctx.strokeStyle = "rgba(27,43,42,.18)"; ctx.lineWidth = 1
+  roundRect(ctx, bx, by, bw, bh, 10); ctx.fill(); ctx.stroke()
+  ctx.beginPath(); ctx.moveTo(x - 6, by + bh - 0.5); ctx.lineTo(x, by + bh + 8); ctx.lineTo(x + 6, by + bh - 0.5); ctx.fill()
+  ctx.fillStyle = "#1b2b2a"; ctx.textAlign = "center"; ctx.textBaseline = "top"
+  lines.forEach((l, i) => ctx.fillText(l, x, by + 6 + i * (fs + 3)))
+  ctx.restore()
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath()
 }

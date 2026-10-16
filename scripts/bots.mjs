@@ -17,6 +17,7 @@ import {
   SIZE, MATERIALS, DAY_BLOCKS, publicClient, walletClient, collect, worldQuery, guildsQuery, layout, lifeLeft,
   claimAndBuild, renew, tend, inscribe, foundGuild, sell, build, placeCommons, COMMONS,
   buildHome, keepAfloat, homesQuery, HOME_STYLES, fish, sleep as goToBed, visit, lifeQuery, needsOf, DISHES,
+  createPresence, movePresence,
 } from "../shared/tideland.js"
 import { ExpirationTime, jsonToPayload } from "@arkiv-network/sdk"
 import { str } from "@arkiv-network/sdk/attr"
@@ -121,6 +122,23 @@ async function village() {
     if (strangers.length && Math.random() < 0.12) await call(b, pick(strangers), lives, h)
   }))
 }
+/** Villagers wander: each round they stroll somewhere near home or to a neighbour's door (25-minute presence). */
+async function wander() {
+  const h = await head()
+  const all = await collect(worldQuery(pub))
+  const homes = all.filter((x) => x.kind === "home" && x.expiresAt > h)
+  const presences = all.filter((x) => x.kind === "presence" && x.expiresAt > h)
+  await Promise.all(BOTS.map(async (b) => {
+    const home = homes.find((x) => x.creator.toLowerCase() === b.account.address.toLowerCase()); if (!home) return
+    const goal = Math.random() < 0.35 ? pick(homes) : home
+    const x = Math.max(0, Math.min(31, goal.x + 1 + Math.round((Math.random() - 0.5) * 3))), y = Math.max(0, Math.min(31, goal.y + 1 + Math.round((Math.random() - 0.5) * 3)))
+    const mine = presences.find((p) => p.owner.toLowerCase() === b.account.address.toLowerCase())
+    await safely(`${home.data.islander} strolls to ${x},${y}`, () => mine
+      ? movePresence(b.wallet, { key: mine.key, x, y, seconds: 1500 })
+      : createPresence(b.wallet, { home, x, y, seconds: 1500 }))
+  }))
+}
+
 async function call(b, home, lives, h) {
   const n = lives.get(home.key)
   const dish = n && n.food < 0.5 ? pick(DISHES) : null
@@ -204,6 +222,7 @@ async function tick() {
   const w = await world()
   await harbour(w)
   await safely("village", village)
+  await safely("wander", wander)
   await Promise.all(BOTS.map(async (b) => {
     const me = b.account.address.toLowerCase(), g = GUILDS[b.guild]
     const mine = [...w.cells.values()].filter((c) => c.structure && c.structure.owner.toLowerCase() === me)
@@ -256,6 +275,7 @@ else if (cmd === "seed") { await fund(arg ?? "0.05"); await seedWorld() }
 else if (cmd === "tick") await tick()
 else if (cmd === "harbour") await harbour(await world())
 else if (cmd === "village") await village()
+else if (cmd === "wander") await wander()
 else if (cmd === "loop") {
   const every = Number(arg ?? 20) * 60_000
   for (;;) { await safely("fund", () => fund()); await safely("tick", tick); await sleep(every) }

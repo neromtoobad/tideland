@@ -36,11 +36,12 @@ export function createHouse(deps) {
     landing()
   }
 
-  async function open(key, { push = true } = {}) {
+  async function open(key, { push = true, panel = false } = {}) {
     show()
+    cur = null
     $("house").innerHTML = `<div class="house-loading">Knocking on the door…</div>`
     if (push) history.replaceState(null, "", `?h=${key}${state.embed ? "&embed=1" : ""}`)
-    onOpen?.()
+    onOpen?.({ panel })
     let h = state.things.get(key)
     try { h = toThing(await pub().getEntity(key)) } catch { /* sunk, or not indexed yet */ }
     cur = { key, home: h, life: [...state.things.values()].filter((t) => t.home === key), hold: null, saved: null }
@@ -114,7 +115,7 @@ export function createHouse(deps) {
     const mine = isMine()
     const mood = cur.hold ? "waving" : n.mood
     const nm = esc(name(h))
-    el.innerHTML = `
+    el.innerHTML = `${closeBtn()}
       <div class="eyebrow">${mine ? "Your islander" : "You're visiting"}</div>
       <h2>${nm}</h2>
       <p class="mood mood-${n.mood}">${nm} ${MOOD_SELF[n.mood]}</p>
@@ -135,6 +136,12 @@ export function createHouse(deps) {
       ${diary(h)}
       ${mine ? neighbours("Neighbours who need help") : ""}
       <details class="more"><summary>How this works on Arkiv</summary><p>Each bar is an Arkiv entity pointing at this house, and it expires by itself: a meal after 8 hours, sleep after 12, a visit after 24; the house can hold 3 days at most and anyone can extend it. Whoever cooked a meal or visited is that entity's on-chain author. <a href="${explorer}/entity/${h.key}" target="_blank" rel="noopener">See the house entity</a>.</p></details>`
+  }
+
+  const closeBtn = () => (document.body.classList.contains("play") ? `<button class="close" data-house="close" aria-label="Back to the island">×</button>` : "")
+  function close() {
+    cur = null; $("house").hidden = true; document.body.classList.remove("housing")
+    history.replaceState(null, "", location.pathname)
   }
 
   function bar(label, f, text, isHome) {
@@ -344,7 +351,7 @@ export function createHouse(deps) {
       sfx.start()
       await new Promise((res) => setTimeout(res, 1500))
       await refresh().catch(() => {})
-      open(r.entityKey)
+      if (deps.onMovedIn) deps.onMovedIn(r.entityKey); else open(r.entityKey)
     } catch (e) { if (s) s.textContent = `That didn't work: ${String(e.shortMessage || e.message).slice(0, 140)}` }
   }
 
@@ -368,7 +375,8 @@ export function createHouse(deps) {
     const v = e.target.closest("[data-visit]"); if (v) return open(v.dataset.visit)
     const a = e.target.closest("[data-house]")?.dataset.house
     if (!a) return
-    if (a === "build") openBuild()
+    if (a === "close") close()
+    else if (a === "build") openBuild()
     else if (a === "create") create()
     else if (a === "sleep") goToBed()
     else if (a === "copy") { navigator.clipboard?.writeText(e.target.dataset.url); toast("Link copied. Send it to someone who'll visit.", 3500) }
@@ -383,5 +391,5 @@ export function createHouse(deps) {
   document.addEventListener("pointercancel", up)
   setInterval(() => { if (cur && !cur.hold && !cur.sealing && $("h-left") && cur.home) $("h-left").textContent = blocksToText(cur.home.expiresAt - headNow()) }, 1000)
 
-  return { open, home, landing, openBuild, onExtended, onCreated, rerender: () => (cur ? render() : null), get key() { return cur?.key }, myHome }
+  return { open, close, home, landing, openBuild, onExtended, onCreated, rerender: () => (cur ? render() : null), get key() { return cur?.key }, myHome }
 }

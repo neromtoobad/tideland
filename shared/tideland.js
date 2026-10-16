@@ -131,6 +131,40 @@ export async function visit(wallet, reader, { home, note, dish, addBlocks = 0n }
   return { ...r, target, minutes }
 }
 
+// ---------- The live layer: where islanders are, and what they're saying ----------
+// Presence is a 10-minute entity: where your islander stands. Arriving somewhere patches its position and
+// extends it in one batch; stop playing and it expires, so your islander leaves the square by itself.
+// Speech is a 60-second entity: the chat evaporates.
+export const PRESENCE_SECONDS = 600
+export const SAY_SECONDS = 60
+
+export function createPresence(wallet, { home, x, y, seconds = PRESENCE_SECONDS }) {
+  return wallet.createEntity({
+    attributes: { ...common("presence"), home: keyAttr(home.key), x: i32(Math.round(x)), y: i32(Math.round(y)), look: str(home.look || "carpenter") },
+    payload: jsonToPayload({ name: home.data?.islander || "" }),
+    contentType: "application/json",
+    expires: ExpirationTime.fromSeconds(seconds),
+  })
+}
+/** Move: patch x,y and push the expiry out again, atomically. */
+export function movePresence(wallet, { key, x, y, seconds = PRESENCE_SECONDS }) {
+  return wallet.executeBatch({
+    patches: [{ entityKey: key, set: { x: i32(Math.round(x)), y: i32(Math.round(y)) } }],
+    extensions: [{ entityKey: key, expires: ExpirationTime.fromSeconds(seconds) }],
+  })
+}
+export function say(wallet, { home, x, y, text }) {
+  return wallet.createEntity({
+    attributes: { ...common("say"), home: keyAttr(home.key), x: i32(Math.round(x)), y: i32(Math.round(y)) },
+    payload: jsonToPayload({ text: String(text).slice(0, 90) }),
+    contentType: "application/json",
+    expires: ExpirationTime.fromSeconds(SAY_SECONDS),
+    flags: { readonly: true },
+  })
+}
+/** The live layer: every Tideland entity that expires within the hour (presence, speech, sinking things). */
+export const nowQuery = (client, head) => client.select(FIELDS).where(eq("app", APP), eq("world", WORLD), lt("$expiresAt", u64(head + 1800n)))
+
 /** Everything that happened to one islander: one query for its meals, sleeps, visits and saves. */
 export const lifeQuery = (client, homeKey) => client.select(FIELDS).where(eq("app", APP), eq("world", WORLD), eq("home", keyAttr(homeKey)))
 

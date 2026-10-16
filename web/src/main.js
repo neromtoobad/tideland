@@ -1,12 +1,13 @@
 import "./style.css"
 import {
   MATERIALS, INSCRIPTION_SPANS, DAY_BLOCKS, publicClient, collect, worldQuery, tideQuery, legacyQuery, estateQuery,
-  guildsQuery, toThing, layout, isBudgetError, needsOf, lifeLeft, blocksToText, claimAndBuild, build, renew, tend, inscribe, sell,
+  guildsQuery, toThing, layout, isBudgetError, needsOf, nowQuery, lifeLeft, blocksToText, claimAndBuild, build, renew, tend, inscribe, sell,
 } from "../../shared/tideland.js"
 import { createView, draw, loadSprites, spriteUrl, characterFor } from "./render.js"
 import { localWallet, injectedWallet, balanceOf, drip } from "./wallet.js"
 import { createRun } from "./run.js"
 import { createHouse } from "./house.js"
+import { createWalk } from "./walk.js"
 
 const EXPLORER = "https://tiramisu.explorer.arkiv.network"
 const REPO = "https://github.com/neromtoobad/tideland"
@@ -67,6 +68,14 @@ const WORLDLY = new Set(["home", "structure", "parcel", "inscription", "guild"])
 const headNow = () => state.head + BigInt(Math.floor((Date.now() - state.headAt) / 2000))
 
 const refresh = () => reading(refreshNow)
+/** One query for everything expiring within the hour: presence, speech, and whatever is about to sink. */
+const refreshLive = () => reading(async () => {
+  const live = await collect(nowQuery(pub, headNow()))
+  const seen = new Set(live.map((t) => t.key))
+  for (const t of state.things.values()) if ((t.kind === "presence" || t.kind === "say") && !seen.has(t.key) && !t.local) state.things.delete(t.key)
+  for (const t of live) state.things.set(t.key, t)
+  rebuild()
+})
 async function refreshNow() {
   const timing = await pub.getBlockTiming()
   state.head = timing.currentBlock; state.headAt = Date.now()
@@ -91,7 +100,9 @@ function watchLive() {
   let pending = null
   const touch = () => {
     if (runner.active) return // during a run, events update expiries in place: no re-reads
-    clearTimeout(pending); pending = setTimeout(() => refresh().catch(() => {}), 2500)
+    clearTimeout(pending)
+    // walking about, the busy part of the world is short-lived (presence, speech): re-read just that layer
+    pending = setTimeout(() => (walk?.active ? refreshLive() : refresh()).catch(() => {}), walk?.active ? 900 : 2500)
   }
   ws.watchEntityEvents({
     onEntityCreated: (e) => { touch(e); house.onCreated() },
@@ -425,13 +436,24 @@ async function ensureRunWallet({ quiet = false } = {}) {
 
 const house = createHouse({
   state, view, headNow, pub: () => pub, ensureWallet: ensureRunWallet, toast, explorer: EXPLORER, refresh, short, esc, same,
-  onOpen: () => { view.selected = null; renderInspector(); setMode("focus") },
+  onOpen: ({ panel } = {}) => { view.selected = null; renderInspector(); setMode(walk?.active && (panel || walk.active) ? "play" : "focus") },
+  onMovedIn: (key) => { enterPlay(key); house.open(key, { panel: true }); toast("This is your islander. Tap anywhere on the island to walk.", 6000) },
 })
+let walk = null
+
+/** Play mode: you have an islander, so you walk around the island as them. */
+function enterPlay(homeKey) {
+  if (!walk) walk = createWalk({ state, view, headNow, ensureWallet: ensureRunWallet, house, toast, esc, same, short, explorer: EXPLORER })
+  if (!walk.start(homeKey)) return false
+  setMode("play")
+  return true
+}
 
 // Two modes: "focus" (the islander app, map as a quiet backdrop) and "explore" (the whole coast and its tools).
 function setMode(mode) {
   document.body.classList.toggle("focus", mode === "focus")
   document.body.classList.toggle("explore", mode === "explore")
+  document.body.classList.toggle("play", mode === "play" && !!walk?.active)
   $("nav-explore").textContent = mode === "explore" ? (house.myHome() ? "Back to my islander" : "Back") : "Explore the coast"
   if (mode === "explore") { view.fit(); renderTide() }
 }
@@ -439,8 +461,10 @@ document.addEventListener("click", (e) => {
   const nav = e.target.closest("[data-nav]")?.dataset.nav
   if (!nav) { if (!e.target.closest(".menu")) $("menu-list").hidden = true; return }
   $("menu-list").hidden = nav !== "menu" ? true : !$("menu-list").hidden
-  if (nav === "home") { setMode("focus"); house.home() }
-  else if (nav === "explore") { if (document.body.classList.contains("explore")) { setMode("focus"); house.home() } else setMode("explore") }
+  if (nav === "home" || (nav === "explore" && document.body.classList.contains("explore"))) {
+    const mine = house.myHome()
+    if (mine && enterPlay(mine)) house.close(); else { setMode("focus"); house.home() }
+  } else if (nav === "explore") setMode("explore")
   else if (nav === "how") $("btn-how").click()
   else if (nav === "mirror") $("btn-mirror").click()
   else if (nav === "wallet") showWallet()
@@ -475,6 +499,7 @@ const canvas = $("world")
 let drag = null
 canvas.addEventListener("pointerdown", (e) => {
   if (runner.active) { runner.pointerDown(e.clientX, e.clientY); canvas.setPointerCapture(e.pointerId); return }
+  if (walk?.active && document.body.classList.contains("play")) { walk.pointerDown(e.clientX, e.clientY); return }
   drag = { x: e.clientX, y: e.clientY, ox: view.ox, oy: view.oy, moved: false }; canvas.setPointerCapture(e.pointerId) })
 canvas.addEventListener("pointermove", (e) => {
   if (drag) {
@@ -498,8 +523,8 @@ $("zoom-in").onclick = () => zoomAt(innerWidth / 2, innerHeight / 2, 1.25)
 $("zoom-out").onclick = () => zoomAt(innerWidth / 2, innerHeight / 2, 0.8)
 $("zoom-fit").onclick = () => view.fit()
 addEventListener("resize", () => view.resize())
-addEventListener("keydown", (e) => { if (runner.key(e, true)) return; if (e.key === "Escape") select(null) })
-addEventListener("keyup", (e) => { runner.key(e, false) })
+addEventListener("keydown", (e) => { if (runner.key(e, true)) return; if (walk?.active && document.body.classList.contains("play") && walk.key(e, true)) return; if (e.key === "Escape") select(null) })
+addEventListener("keyup", (e) => { runner.key(e, false); walk?.key(e, false) })
 
 // ---------------- boot ----------------
 
@@ -507,7 +532,9 @@ let last = performance.now()
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now
   runner.update(dt)
-  draw(view, { cells: state.cells, guilds: state.guilds, moods: state.moods ?? new Map(), head: state.head, headAt: state.headAt })
+  const playing = walk?.active && document.body.classList.contains("play")
+  if (playing) walk.update(dt)
+  draw(view, { cells: state.cells, guilds: state.guilds, moods: state.moods ?? new Map(), head: state.head, headAt: state.headAt, scene: playing ? walk.scene() : null })
   requestAnimationFrame(frame)
 }
 
@@ -526,8 +553,10 @@ function frame(now) {
   const q = new URLSearchParams(location.search)
   if (q.has("embed")) { state.embed = true; document.body.classList.add("embed") }
   const hk = q.get("h") || location.pathname.match(/^\/h\/(0x[0-9a-fA-F]{64})/)?.[1]
-  if (hk) house.open(hk, { push: !location.pathname.startsWith("/h/") })
-  else if (!q.has("run") && !q.has("explore")) house.home()
+  const mine = house.myHome()
+  const canPlay = mine && (state.things.get(mine)?.expiresAt ?? 0n) > headNow() && enterPlay(mine)
+  if (hk) house.open(hk, { push: !location.pathname.startsWith("/h/"), panel: canPlay })
+  else if (!canPlay && !q.has("run") && !q.has("explore")) house.home()
   if (q.has("explore")) setMode("explore")
   if (house.myHome() && !hk) $("cta-home").outerHTML = `<button class="storm-cta" id="cta-home" data-myhome="1">Your islander <span>see how they're doing, and who came by</span></button>`
   if (q.has("run")) runner.openLobby()
