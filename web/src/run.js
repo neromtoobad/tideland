@@ -129,7 +129,7 @@ export function createRun(deps) {
 
   // ---------- the world as the run sees it ----------
 
-  const commons = () => [...state.cells.values()].map((c) => c.structure).filter((s) => s && COMMONS.includes(s.material) && s.expiresAt > headNow())
+  const commons = () => [...state.cells.values()].map((c) => c.structure).filter((s) => s && s.kind === "structure" && COMMONS.includes(s.material) && s.expiresAt > headNow())
   const expiryOf = (s) => {
     const o = run?.optimistic.get(s.key)
     return o && o > s.expiresAt ? o : s.expiresAt
@@ -275,7 +275,7 @@ export function createRun(deps) {
     const g = view.toGrid(px, py)
     const c = g && state.cells.get(`${g.x}:${g.y}`)
     const s = c?.structure
-    if (s && COMMONS.includes(s.material)) {
+    if (s && s.kind === "structure" && COMMONS.includes(s.material)) {
       run.target = s.key; run.holding = true
       run.goal = { x: s.x + 1.05, y: s.y + 1.05 } // stand in front of it (screen-down is +x +y)
     } else if (g) { run.goal = { x: g.x + 0.5, y: g.y + 0.5 }; run.holding = false }

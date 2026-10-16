@@ -36,7 +36,7 @@ export const TEND_SECONDS = 30 * 86400 // a guestbook line is remembered for a m
 
 export function buildHome(wallet, { x, y, name, style, islander, look }) {
   return wallet.createEntity({
-    attributes: { ...common("home"), x: i32(x), y: i32(y), style: str(HOME_STYLES.includes(style) ? style : "pine"), look: str(LOOKS.includes(look) ? look : "carpenter") },
+    attributes: { ...common("home"), x: i32(x), y: i32(y), style: str(LEVELS.some((l) => l.style === style) ? style : "driftwood"), look: str(LOOKS.includes(look) ? look : "carpenter") },
     payload: jsonToPayload({ name: String(name).slice(0, 40), islander: String(islander || "").slice(0, 24) }),
     contentType: "application/json",
     expires: ExpirationTime.fromSeconds(HOME_START_SECONDS),
@@ -61,7 +61,28 @@ export function tendHome(wallet, { home, target, minutes, note }) {
     }],
   })
 }
-export const homeMaxExpiry = (head) => head + lifetimeBlocks(HOME_MAX_SECONDS)
+export const homeMaxExpiry = (head, home) => head + lifetimeBlocks(home ? levelOf(home.style).days * 86400 : HOME_MAX_SECONDS)
+
+// ---------- The goal: your house grows with your friendships ----------
+// Every visit leaves a 30-day signature. Signatures from distinct people (not you) earn levels, and a higher
+// level holds longer against the tide. The level a house CLAIMS is its `style` attribute (patched on upgrade);
+// any client verifies the claim against the signed visits, and shows an overclaim as unverified.
+export const LEVELS = [
+  { style: "driftwood", friends: 0, days: 2, label: "Driftwood shack" },
+  { style: "pine", friends: 3, days: 3, label: "Pine cottage" },
+  { style: "stone", friends: 6, days: 5, label: "Stone house" },
+  { style: "lighthouse", friends: 10, days: 7, label: "Lighthouse home" },
+]
+export const SIGN_SECONDS = 30 * 86400
+export const levelOf = (style) => LEVELS.find((l) => l.style === style) ?? LEVELS[1]
+export const levelIndex = (style) => Math.max(0, LEVELS.findIndex((l) => l.style === style))
+/** Distinct people (not the owner) who have signed this home's book in the last 30 days. */
+export const signersOf = (home, life) => new Set(life.filter((t) => t.kind === "sign" && t.creator?.toLowerCase() !== home.owner?.toLowerCase()).map((t) => t.creator.toLowerCase()))
+export function earnedLevel(friends) { let i = 0; LEVELS.forEach((l, k) => { if (friends >= l.friends) i = k }); return i }
+/** Upgrade: patch the claimed style. Only worth doing when the signatures back it up. */
+export function upgradeHome(wallet, { home, style }) {
+  return wallet.patchEntity({ entityKey: home.key, set: { style: str(style) } })
+}
 
 // ---------- Islanders: needs are entities ----------
 // Every islander lives in a home. Each need is satisfied by an entity whose lifetime IS the need's decay:
@@ -113,7 +134,7 @@ export async function visit(wallet, reader, { home, note, dish, addBlocks = 0n }
   let target = null, minutes = 0
   if (addBlocks > 0n) {
     const head = (await reader.getBlockTiming()).currentBlock
-    const cap = homeMaxExpiry(head), base = home.expiresAt > head ? home.expiresAt : head
+    const cap = homeMaxExpiry(head, home), base = home.expiresAt > head ? home.expiresAt : head
     target = base + addBlocks > cap ? cap : base + addBlocks
     if (target > home.expiresAt) {
       minutes = (Number(target - home.expiresAt) * BLOCK_SECONDS) / 60
@@ -127,6 +148,8 @@ export async function visit(wallet, reader, { home, note, dish, addBlocks = 0n }
       })
     }
   }
+  // the lasting part of a visit: a 30-day signature in the house's book (what levels are earned from)
+  creates.push(needCreate("sign", home.key, SIGN_SECONDS, { note: String(note ?? "").slice(0, 80) }))
   const r = await wallet.executeBatch({ creates, ownershipChanges, extensions })
   return { ...r, target, minutes }
 }
@@ -179,7 +202,7 @@ export function needsOf(home, life, head) {
   const food = frac("meal", NEEDS.food.seconds), rest = frac("sleep", NEEDS.rest.seconds)
   const friendsAlive = alive.filter((t) => t.kind === "visit" && t.creator?.toLowerCase() !== home.owner?.toLowerCase())
   const friends = Math.min(1, new Set(friendsAlive.map((t) => t.creator.toLowerCase())).size / 3) * (friendsAlive.length ? 0.4 + 0.6 * frac("visit", NEEDS.friends.seconds) : 0)
-  const homeFrac = Math.max(0, Math.min(1, Number(home.expiresAt - head) / Number(lifetimeBlocks(HOME_MAX_SECONDS))))
+  const homeFrac = Math.max(0, Math.min(1, Number(home.expiresAt - head) / Number(lifetimeBlocks(levelOf(home.style).days * 86400))))
   const age = (kind) => { const t = alive.filter((x) => x.kind === kind).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0]; return t ? Number(head - t.createdAt) : Infinity }
   let mood = "happy"
   if (age("sleep") < 1800) mood = "sleeping" // the first hour of a night's sleep
@@ -200,7 +223,7 @@ export function needsOf(home, life, head) {
 export async function keepAfloat(wallet, reader, { home, addBlocks, note }) {
   for (let attempt = 0; ; attempt++) {
     const head = (await reader.getBlockTiming()).currentBlock
-    const cap = homeMaxExpiry(head)
+    const cap = homeMaxExpiry(head, home)
     const base = home.expiresAt > head ? home.expiresAt : head
     const target = base + addBlocks > cap ? cap : base + addBlocks
     if (target <= home.expiresAt) return { full: true }
@@ -244,7 +267,8 @@ export function walletClient(account, opts) {
 /** True when the node refused for budget (HTTP 429). viem nests the HTTP error under one or more `cause`s. */
 export function isBudgetError(e) {
   for (let cur = e, depth = 0; cur && depth < 8; cur = cur.cause, depth++) {
-    if (cur.status === 429 || /ANON_COST_LIMITED|Status: 429|status 429/i.test(`${cur.details ?? ""} ${cur.message ?? ""}`)) return true
+    // the node signals an exhausted budget two ways: HTTP 429, or JSON-RPC -32005 "Request exceeds defined limit"
+    if (cur.status === 429 || cur.code === -32005 || /ANON_COST_LIMITED|Status: 429|status 429|-32005|exceeds defined limit/i.test(`${cur.details ?? ""} ${cur.message ?? ""}`)) return true
   }
   return false
 }
@@ -256,14 +280,26 @@ const common = (kind) => ({ app: APP, world: WORLD, kind })
 
 const FIELDS = { key: true, owner: true, creator: true, createdAt: true, expiresAt: true, creationFlags: true, attributes: true, payload: true }
 
+const pause = (ms) => new Promise((r) => setTimeout(r, ms))
+/** Retries a read that the node turned away for a moment (JSON-RPC -32005 "Request exceeds defined limit"). */
+async function patient(fn, tries = 3) {
+  for (let i = 0; ; i++) {
+    try { return await fn() } catch (e) {
+      if (i >= tries - 1 || !/-32005|exceeds defined limit/i.test(String(e?.message ?? e))) throw e
+      await pause(1200 * (i + 1))
+    }
+  }
+}
+
 /** Walks every page of a query (max 200 per page) and returns plain world objects. */
 export async function collect(builder) {
   const out = []
-  let page = await builder.limit(200).fetch()
+  let page = await patient(() => builder.limit(200).fetch())
   for (;;) {
     for (const e of page.entities) out.push(toThing(e))
     if (!page.hasNextPage()) break
-    page = await page.next()
+    const prev = page
+    page = await patient(() => prev.next())
   }
   return out
 }

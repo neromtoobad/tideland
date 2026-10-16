@@ -60,3 +60,44 @@ export const sfx = {
     }
   },
 }
+
+// ---------- ambient: a soft pad, a few plucks, and the sea (synthesised, no files) ----------
+let amb = null
+const CHORDS = [[0, 4, 7, 11], [5, 9, 12, 16], [9, 12, 16, 19], [7, 11, 14, 17]] // Cmaj7, Fmaj7, Am7, G6
+export function ambient(on) {
+  const a = ac()
+  if (on && !amb) {
+    const out = a.createGain(); out.gain.value = 0.0001; out.connect(master)
+    out.gain.exponentialRampToValueAtTime(0.22, a.currentTime + 3)
+    const lp = a.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 900; lp.connect(out)
+    // the sea: filtered noise with a slow swell
+    const sea = a.createBufferSource(); sea.buffer = noiseBuffer(4); sea.loop = true
+    const sf = a.createBiquadFilter(); sf.type = "lowpass"; sf.frequency.value = 380
+    const sg = a.createGain(); sg.gain.value = 0.18
+    const lfo = a.createOscillator(), lg = a.createGain(); lfo.frequency.value = 0.09; lg.gain.value = 0.12; lfo.connect(lg).connect(sg.gain)
+    sea.connect(sf).connect(sg).connect(out); sea.start(); lfo.start()
+    let step = 0
+    const tick = () => {
+      const t = a.currentTime, chord = CHORDS[step % CHORDS.length]
+      for (const n of chord) {
+        const o = a.createOscillator(), g = a.createGain()
+        o.type = "triangle"; o.frequency.value = 130.81 * Math.pow(2, n / 12); o.detune.value = (Math.random() - 0.5) * 8
+        g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.05, t + 1.5); g.gain.exponentialRampToValueAtTime(0.0001, t + 6.5)
+        o.connect(g).connect(lp); o.start(t); o.stop(t + 7)
+      }
+      for (let i = 0; i < 3; i++) if (Math.random() < 0.6) {
+        const n = chord[Math.floor(Math.random() * chord.length)] + 24, at = t + 0.6 + Math.random() * 4
+        const o = a.createOscillator(), g = a.createGain(); o.type = "sine"; o.frequency.value = 130.81 * Math.pow(2, n / 12)
+        g.gain.setValueAtTime(0.0001, at); g.gain.exponentialRampToValueAtTime(0.035, at + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, at + 1.6)
+        o.connect(g).connect(out); o.start(at); o.stop(at + 1.7)
+      }
+      step++
+    }
+    tick()
+    amb = { out, sea, lfo, timer: setInterval(tick, 6000) }
+  } else if (!on && amb) {
+    const s = amb; amb = null; clearInterval(s.timer)
+    s.out.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + 1.2)
+    setTimeout(() => { s.sea.stop(); s.lfo.stop() }, 1400)
+  }
+}

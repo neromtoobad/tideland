@@ -7,7 +7,7 @@ mkdirSync(OUT, { recursive: true })
 const names = readdirSync(RAW).filter((f) => f.endsWith(".png")).map((f) => f.slice(0, -4)).sort()
 const tiles = []
 for (const n of names) {
-  const isChar = /carpenter|mason|lamplighter|stew/.test(n)
+  const isChar = /carpenter|mason|lamplighter|stew|deco|boat/.test(n)
   const img = sharp(`${RAW}/${n}.png`).trim({ threshold: 2 })
   const buf = await img.resize({ width: isChar ? 192 : 384, withoutEnlargement: true }).webp({ quality: 88, alphaQuality: 95 }).toBuffer()
   await sharp(buf).toFile(`${OUT}/${n}.webp`)

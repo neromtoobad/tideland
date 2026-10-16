@@ -8,6 +8,7 @@ import { localWallet, injectedWallet, balanceOf, drip } from "./wallet.js"
 import { createRun } from "./run.js"
 import { createHouse } from "./house.js"
 import { createWalk } from "./walk.js"
+import { ambient, setMuted } from "./sfx.js"
 
 const EXPLORER = "https://tiramisu.explorer.arkiv.network"
 const REPO = "https://github.com/neromtoobad/tideland"
@@ -80,7 +81,9 @@ async function refreshNow() {
   const timing = await pub.getBlockTiming()
   state.head = timing.currentBlock; state.headAt = Date.now()
   $("stat-block").textContent = state.head.toLocaleString()
-  let [things, tide] = await Promise.all([collect(worldQuery(pub)), collect(tideQuery(pub, state.head))])
+  // one after the other: the node turns away bursts of parallel paging
+  let things = await collect(worldQuery(pub))
+  let tide = await collect(tideQuery(pub, state.head))
   if (import.meta.env.DEV && new URLSearchParams(location.search).has("mock")) {
     things = (await import("./dev/mock.js")).mockThings(state.head)
     tide = things.filter((t) => t.expiresAt < state.head + DAY_BLOCKS)
@@ -465,11 +468,33 @@ document.addEventListener("click", (e) => {
     const mine = house.myHome()
     if (mine && enterPlay(mine)) house.close(); else { setMode("focus"); house.home() }
   } else if (nav === "explore") setMode("explore")
+  else if (nav === "sound") { soundOn = !soundOn; try { localStorage.setItem("tideland.sound", soundOn ? "1" : "0") } catch {}; applySound() }
+  else if (nav === "board") showBoard()
   else if (nav === "how") $("btn-how").click()
   else if (nav === "mirror") $("btn-mirror").click()
   else if (nav === "wallet") showWallet()
   else if (nav === "drip") walletAction("btn-drip").then(() => setTimeout(showWallet, 3000))
 })
+// sound: on by default, starting on the first tap (browsers block autoplay)
+let soundOn = (() => { try { return localStorage.getItem("tideland.sound") !== "0" } catch { return true } })()
+let soundStarted = false
+function applySound() { $("nav-sound").textContent = soundOn ? "🔊" : "🔇"; setMuted(!soundOn); if (soundStarted) ambient(soundOn) }
+document.addEventListener("pointerdown", () => { if (!soundStarted) { soundStarted = true; applySound() } }, { once: true })
+
+/** The island board: who is most loved (distinct people who signed their book) and who has lasted longest. */
+function showBoard() {
+  const head = headNow()
+  const homes = [...state.things.values()].filter((t) => t.kind === "home" && t.expiresAt > head)
+  const signs = [...state.things.values()].filter((t) => t.kind === "sign" && t.expiresAt > head)
+  const loved = homes.map((h) => ({ h, n: new Set(signs.filter((s) => s.home === h.key && !same(s.creator, h.owner)).map((s) => s.creator.toLowerCase())).size })).sort((a, b) => b.n - a.n).slice(0, 8)
+  const oldest = homes.slice().sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1)).slice(0, 8)
+  const row = (h, right) => `<li data-visit="${h.key}"><img src="${spriteUrl(h.style || "pine")}" alt="" /><b>${esc(h.data.islander || h.data.name)}</b><span>${right}</span></li>`
+  modal(`<h2>Island board</h2><p class="note">Both lists are plain Arkiv queries over live entities, and both forget: signatures last 30 days, and a house that sinks drops off.</p>
+    <div class="boards"><div><h3>Most loved</h3><ol class="board2">${loved.map(({ h, n }) => row(h, `${n} ${n === 1 ? "friend" : "friends"}`)).join("")}</ol></div>
+    <div><h3>Longest afloat</h3><ol class="board2">${oldest.map((h) => row(h, blocksToText(head - h.createdAt))).join("")}</ol></div></div>`)
+}
+$("modal").addEventListener("click", (e) => { const v = e.target.closest("[data-visit]"); if (v) { $("modal").close(); house.open(v.dataset.visit, { panel: !!walk?.active }) } })
+
 async function showWallet() {
   if (!state.wallet) { state.wallet = localWallet(); try { localStorage.setItem("tideland.mode", "local") } catch {} }
   await updateBalance()
@@ -543,7 +568,13 @@ function frame(now) {
   requestAnimationFrame(frame)
   try { if (localStorage.getItem("tideland.mode") === "local") state.wallet = localWallet() } catch {}
   renderWallet(); updateBalance()
-  try { await refresh() } catch (err) { toast(`Could not reach Arkiv: ${esc(err.message)}`, 0) }
+  // the node sometimes turns away a burst of reads for a moment: try a few times before saying anything
+  for (let i = 0; i < 4; i++) {
+    try { await refresh(); $("toast").hidden = true; break } catch (err) {
+      if (i === 3) toast(`Could not reach Arkiv: ${esc(err.message)}`, 0)
+      else await new Promise((r) => setTimeout(r, 2000 * (i + 1)))
+    }
+  }
   try { watchLive() } catch (err) { console.warn(err) }
   // Live changes arrive on the socket; a slow background re-read is only a safety net. Expiry needs no
   // re-read at all: every frame compares each entity's $expiresAt with the estimated head block.

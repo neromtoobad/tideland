@@ -3,7 +3,7 @@
 // only other people can visit, cook for them, or keep the house afloat. Every action is one transaction.
 import {
   HOME_MAX_SECONDS, HOME_STYLES, BLOCK_SECONDS, SIZE, LOOKS, NEEDS, DISHES, homeMaxExpiry, buildHome, fish, sleep, visit,
-  lifeQuery, needsOf, collect, blocksToText, toThing, lifetimeBlocks,
+  lifeQuery, needsOf, collect, blocksToText, toThing, lifetimeBlocks, LEVELS, levelOf, levelIndex, signersOf, earnedLevel, upgradeHome,
 } from "../../shared/tideland.js"
 import { spriteUrl } from "./render.js"
 import { sfx } from "./sfx.js"
@@ -72,7 +72,8 @@ export function createHouse(deps) {
         <li><span>🎣</span><div>You feed them by going fishing.</div></li>
         <li><span>😴</span><div>You put them to bed.</div></li>
         <li><span>🤝</span><div>They need friends, and only <b>other people</b> can visit.</div></li>
-        <li><span>🌊</span><div>Their house sinks within 3 days unless visitors shore it up.</div></li>
+        <li><span>🌊</span><div>Their house sinks unless visitors shore it up.</div></li>
+        <li><span>🏡</span><div>Every friend who visits signs the book, and the house grows: shack → cottage → stone house → lighthouse home. Bigger houses hold longer.</div></li>
       </ul>
       <button class="primary cta-big" data-house="build">Move in</button>
       ${neighbours("Or visit someone who needs help now")}
@@ -119,6 +120,7 @@ export function createHouse(deps) {
       <div class="eyebrow">${mine ? "Your islander" : "You're visiting"}</div>
       <h2>${nm}</h2>
       <p class="mood mood-${n.mood}">${nm} ${MOOD_SELF[n.mood]}</p>
+      ${levelBlock(h, mine)}
       <div class="diorama ${cur.hold ? "lifting" : ""}" id="h-diorama">
         <img class="home" src="${spriteUrl(h.style || "pine")}" alt="" style="transform: translateY(${(water(left) - 40) * 0.35}px)" />
         <img class="islander pose-${mood}" id="h-islander" src="${spriteUrl(poseSprite(h.look, mood))}" alt="" />
@@ -142,6 +144,18 @@ export function createHouse(deps) {
   function close() {
     cur = null; $("house").hidden = true; document.body.classList.remove("housing")
     history.replaceState(null, "", location.pathname)
+  }
+
+  function levelBlock(h, mine) {
+    const signers = signersOf(h, cur.life).size, claimed = levelIndex(h.style), earned = earnedLevel(signers)
+    const lv = LEVELS[claimed], next = LEVELS[Math.min(LEVELS.length - 1, earned + 1)]
+    const atTop = earned >= LEVELS.length - 1
+    const pct = atTop ? 100 : Math.min(100, (signers / next.friends) * 100)
+    return `<div class="level">
+      <div class="lvl-head"><img src="${spriteUrl(h.style || "pine")}" alt="" /><div><b>${lv.label}</b>${claimed > earned ? ` <span class="badge sink" title="The signed visits only back a ${LEVELS[earned].label}">unverified</span>` : ""}<span>holds up to ${lv.days} days against the tide · ${signers} ${signers === 1 ? "friend has" : "friends have"} signed the book</span></div></div>
+      ${atTop ? `<p class="note small">The highest a house can grow. ${esc(name(h))} is well loved.</p>` : `<div class="life"><span style="width:${pct}%"></span></div><p class="note small">${signers} of ${next.friends} friends for a <b>${next.label}</b> (holds ${next.days} days)</p>`}
+      ${mine && earned > claimed ? `<button class="gold" data-house="upgrade" data-to="${LEVELS[earned].style}">⬆ Upgrade to ${LEVELS[earned].label}</button>` : ""}
+    </div>`
   }
 
   function bar(label, f, text, isHome) {
@@ -195,7 +209,8 @@ export function createHouse(deps) {
       const by = same(t.creator, h.owner) ? null : (same(t.creator, state.wallet?.address) ? "You" : short(t.creator))
       if (t.kind === "meal") lines.push({ at: t.createdAt, text: by ? `${by} brought ${esc(t.data.dish || "food")}.` : `Caught ${esc(t.data.dish || "a fish")}.` })
       else if (t.kind === "sleep") lines.push({ at: t.createdAt, text: "Slept." })
-      else if (t.kind === "visit" && by) lines.push({ at: t.createdAt, text: t.data.note ? `${by} visited: “${esc(t.data.note)}”` : `${by} visited.` })
+      else if (t.kind === "sign" && by) lines.push({ at: t.createdAt, text: t.data.note ? `${by} visited and signed the book: “${esc(t.data.note)}”` : `${by} visited and signed the book.` })
+      else if (t.kind === "visit" && by && !cur.life.some((x) => x.kind === "sign" && same(x.creator, t.creator) && x.createdAt === t.createdAt)) lines.push({ at: t.createdAt, text: t.data.note ? `${by} visited: “${esc(t.data.note)}”` : `${by} visited.` })
       else if (t.kind === "tend") lines.push({ at: t.createdAt, text: `${by ?? "Someone"} shored up the house (+${fmtMin(Number(t.attrs?.minutes ?? 0))}).` })
     }
     lines.sort((a, b) => (a.at < b.at ? 1 : -1))
@@ -203,14 +218,14 @@ export function createHouse(deps) {
   }
 
   const fmtMin = (m) => (m < 60 ? `${m}m` : m < 1440 ? `${(m / 60).toFixed(m < 600 ? 1 : 0)}h` : `${(m / 1440).toFixed(1)}d`)
-  const water = (left) => Math.max(8, Math.min(86, 84 - Math.pow(Math.max(0, Number(left)) / Number(MAX_BLOCKS), 0.55) * 76))
+  const water = (left) => Math.max(8, Math.min(86, 84 - Math.pow(Math.max(0, Number(left)) / Number(lifetimeBlocks(levelOf(cur?.home?.style).days * 86400)), 0.55) * 76))
   const status = (t) => { const s = $("h-status"); if (s) s.innerHTML = t }
 
   // ---------- visiting: tap to visit, hold to also shore up the house ----------
 
   function holdStart() {
     if (!cur?.home || cur.hold || cur.sealing) return
-    cur.hold = { target: cur.home.expiresAt, cap: homeMaxExpiry(headNow()), added: 0n, timer: null, t0: performance.now() }
+    cur.hold = { target: cur.home.expiresAt, cap: homeMaxExpiry(headNow(), cur.home), added: 0n, timer: null, t0: performance.now() }
     $("h-hold")?.classList.add("holding")
     if ($("h-islander")) $("h-islander").src = spriteUrl(poseSprite(cur.home.look, "waving"))
     const step = BigInt((HOLD_TICK_MINUTES * 60) / BLOCK_SECONDS)
@@ -322,7 +337,7 @@ export function createHouse(deps) {
       <div class="keepers">${LOOKS.map((l, i) => `<button class="keeper" data-look="${l}" aria-pressed="${i === 0}"><img src="${spriteUrl(l + "-waving")}" alt="" /><b>${l[0].toUpperCase() + l.slice(1)}</b></button>`).join("")}</div>
       <input id="b-islander" maxlength="24" placeholder="Give them a name (e.g. Wren)" />
       <button class="primary cta-big" data-house="create">Move in</button>
-      <p class="note small" id="b-status">They get a house by the sea with 12 hours before the tide reaches it. Pick a made-up name; it's public.</p>
+      <p class="note small" id="b-status">They start in a driftwood shack by the sea, 12 hours from the tide. Friends who visit help it grow. Pick a made-up name; it's public.</p>
       <button class="textlink" data-nav="home">Back</button>`
     setTimeout(() => $("b-islander")?.focus(), 50)
   }
@@ -341,7 +356,7 @@ export function createHouse(deps) {
     const islander = $("b-islander")?.value.trim()
     if (!islander) return $("b-islander")?.focus()
     const look = document.querySelector("[data-look][aria-pressed='true']")?.dataset.look || "carpenter"
-    const style = HOME_STYLES[Math.floor(Math.random() * 2)] // pine or stone
+    const style = "driftwood" // everyone starts in a shack; friends help it grow
     const s = $("b-status"); if (s) s.innerHTML = `<span class="pulse">Moving ${esc(islander)} in…</span>`
     try {
       const wallet = await ensureWallet({ quiet: false }); if (!wallet) throw new Error("no wallet")
@@ -379,6 +394,13 @@ export function createHouse(deps) {
     else if (a === "build") openBuild()
     else if (a === "create") create()
     else if (a === "sleep") goToBed()
+    else if (a === "upgrade") {
+      const style = e.target.closest("[data-house]").dataset.to
+      act((w) => upgradeHome(w.client, { home: cur.home, style }), (r) => {
+        cur.home = { ...cur.home, style }; sfx.clutch()
+        return `${esc(name(cur.home))}'s house is now a ${levelOf(style).label}. It can hold ${levelOf(style).days} days. <a href="${explorer}/tx/${r.txHash}" target="_blank" rel="noopener">receipt</a>`
+      })
+    }
     else if (a === "copy") { navigator.clipboard?.writeText(e.target.dataset.url); toast("Link copied. Send it to someone who'll visit.", 3500) }
   })
   document.addEventListener("keydown", (e) => { if (e.key === "Enter" && document.activeElement?.id === "b-islander") create() })

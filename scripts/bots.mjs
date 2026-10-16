@@ -17,7 +17,7 @@ import {
   SIZE, MATERIALS, DAY_BLOCKS, publicClient, walletClient, collect, worldQuery, guildsQuery, layout, lifeLeft,
   claimAndBuild, renew, tend, inscribe, foundGuild, sell, build, placeCommons, COMMONS,
   buildHome, keepAfloat, homesQuery, HOME_STYLES, fish, sleep as goToBed, visit, lifeQuery, needsOf, DISHES,
-  createPresence, movePresence,
+  createPresence, movePresence, LEVELS, signersOf, earnedLevel, upgradeHome,
 } from "../shared/tideland.js"
 import { ExpirationTime, jsonToPayload } from "@arkiv-network/sdk"
 import { str } from "@arkiv-network/sdk/attr"
@@ -109,14 +109,22 @@ async function village() {
     }
   }
   const botAddrs = new Set(BOTS.map((b) => b.account.address.toLowerCase()))
-  const lives = new Map(await Promise.all(homes.map(async (x) => [x.key, needsOf(x, await collect(lifeQuery(pub, x.key)), h)])))
+  const lifeOf = new Map(await Promise.all(homes.map(async (x) => [x.key, await collect(lifeQuery(pub, x.key))])))
+  const lives = new Map(homes.map((x) => [x.key, needsOf(x, lifeOf.get(x.key), h)]))
+  // honest levels: a villager's house claims exactly what its signatures have earned
+  for (const b of BOTS) {
+    const home = byCreator(b.account.address); if (!home) continue
+    const earned = LEVELS[earnedLevel(signersOf(home, lifeOf.get(home.key)).size)].style
+    if (home.style !== earned) await safely(`${home.data.islander} ${LEVELS.findIndex((l) => l.style === earned) > LEVELS.findIndex((l) => l.style === home.style) ? "upgrades to" : "settles at"} ${earned}`, () => upgradeHome(b.wallet, { home, style: earned }))
+  }
   await Promise.all(BOTS.map(async (b) => {
     const home = byCreator(b.account.address), n = home && lives.get(home.key)
     if (n && n.food < 0.35 && Math.random() < 0.7) await safely(`${home.data.islander ?? "?"} goes fishing`, () => fish(b.wallet, { home, dish: pick(["grilled mackerel", "smoked herring", "fish stew"]) }))
     if (n && n.rest < 0.25 && Math.random() < 0.8) await safely(`${home.data.islander ?? "?"} goes to bed`, () => goToBed(b.wallet, { home }))
     // visit a lonely neighbour, often with food, sometimes shoring up their house
-    const lonely = homes.filter((x) => botAddrs.has(x.creator.toLowerCase()) && x.key !== home?.key && (lives.get(x.key)?.friends ?? 0) < 0.5)
-    if (lonely.length && Math.random() < 0.35) await call(b, pick(lonely), lives, h)
+    const neighbours = homes.filter((x) => botAddrs.has(x.creator.toLowerCase()) && x.key !== home?.key)
+    const lonely = neighbours.filter((x) => (lives.get(x.key)?.friends ?? 0) < 0.5)
+    if (neighbours.length && Math.random() < 0.6) await call(b, pick(lonely.length ? lonely : neighbours), lives, h)
     // a player's islander in trouble: rare, so friends still matter most
     const strangers = homes.filter((x) => !botAddrs.has(x.creator.toLowerCase()) && (x.expiresAt - h < 3600n || lives.get(x.key)?.mood === "hungry"))
     if (strangers.length && Math.random() < 0.12) await call(b, pick(strangers), lives, h)

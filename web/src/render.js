@@ -3,7 +3,8 @@ import { SIZE, lifeLeft, BLOCK_SECONDS, MATERIALS, COMMONS } from "../../shared/
 
 const TW = 96, TH = 48 // tile diamond at zoom 1
 const POSES = ["", "-hungry", "-sleepy", "-sleeping", "-eating", "-waving"]
-const SPRITES = ["driftwood", "pine", "stone", "monument", "lighthouse", "plot", "inscription", "buoy", "jetty", "seawall", "stew",
+const DECOR = ["deco-palm", "deco-pines", "deco-rocks", "deco-flowers", "deco-grass", "deco-bench", "boat-row", "boat-sail"]
+const SPRITES = ["driftwood", "pine", "stone", "monument", "lighthouse", "plot", "inscription", "buoy", "jetty", "seawall", "stew", ...DECOR,
   ...["carpenter", "mason", "lamplighter"].flatMap((l) => POSES.map((p) => l + p)),
   "carpenter", "carpenter-sad", "mason", "mason-sad", "lamplighter", "lamplighter-sad"]
 const img = {}
@@ -96,16 +97,18 @@ export function draw(view, world) {
     const { sx, sy } = view.toScreen(x, y)
     if (sx < -w || sx > innerWidth + w || sy < -h * 2 || sy > innerHeight + h) continue
     const shade = (x * 7 + y * 13) % 5
-    ctx.fillStyle = ["#ece3cb", "#e9dfc4", "#eee6d0", "#e6dcbf", "#ebe2c8"][shade]
+    ctx.fillStyle = isSand(x, y) ? ["#ece3cb", "#e9dfc4", "#eee6d0", "#e6dcbf", "#ebe2c8"][shade] : ["#d3e0b4", "#cddbad", "#d7e3ba", "#c9d8a8", "#d0deb1"][shade]
     diamond(ctx, sx, sy, w, h); ctx.fill()
   }
 
   // depth-sorted objects
-  const order = [...world.cells.values()].sort((a, b) => (a.x + a.y) - (b.x + b.y) || a.x - b.x)
+  const order = ALL_CELLS
   const actors = [], islanders = []
-  for (const c of order) {
-    const { sx, sy } = view.toScreen(c.x, c.y)
+  for (const [cx, cy] of order) {
+    const { sx, sy } = view.toScreen(cx, cy)
     if (sx < -w * 2 || sx > innerWidth + w * 2 || sy < -h * 6 || sy > innerHeight + h * 2) continue
+    const c = world.cells.get(`${cx}:${cy}`)
+    if (!c || (!c.structure && !c.parcel && !c.inscriptions.length)) { drawDecor(ctx, cx, cy, sx, sy, w, h, t); if (!c) continue }
     const s = c.structure
     if (s) {
       drawThing(ctx, s.material, s, head, sx, sy, w, h, t)
@@ -139,6 +142,9 @@ export function draw(view, world) {
 
   if (run) drawRunLayer(view, world, run, head, w, h, t, now)
   if (scene && !run) drawWalkers(view, scene, w, h, t)
+
+  drawBoats(view, w, h, t)
+  drawSky(view, world, head, w, h, t)
 
   // splashes: rings where something just went under
   view.splashes = view.splashes.filter((p) => now - p.at < 3500)
@@ -260,7 +266,7 @@ function drawRunLayer(view, world, run, head, w, h, t, now) {
   // ring timers over every live commons: the real remaining life, optimistic while a patch is sealing
   for (const c of world.cells.values()) {
     const s = c.structure
-    if (!s || !COMMONS.includes(s.material)) continue
+    if (!s || s.kind !== "structure" || !COMMONS.includes(s.material)) continue
     const exp = run.optimistic.get(s.key) > s.expiresAt ? run.optimistic.get(s.key) : s.expiresAt
     if (exp <= head) continue
     const span = Number(MATERIALS[s.material].seconds / BLOCK_SECONDS), left = Number(exp - head), frac = Math.min(1, left / span)
@@ -312,7 +318,7 @@ function drawRunLayer(view, world, run, head, w, h, t, now) {
   // danger compass: arrows at the screen edge toward commons about to go under
   for (const c of world.cells.values()) {
     const s = c.structure
-    if (!s || !COMMONS.includes(s.material)) continue
+    if (!s || s.kind !== "structure" || !COMMONS.includes(s.material)) continue
     const exp = run.optimistic.get(s.key) > s.expiresAt ? run.optimistic.get(s.key) : s.expiresAt
     const frac = Number(exp - head) / Number(MATERIALS[s.material].seconds / BLOCK_SECONDS)
     if (exp <= head || frac > 0.15) continue
@@ -413,4 +419,80 @@ function drawSpeech(ctx, x, y, text, zoom) {
 
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath()
+}
+
+// ---------------- the island's own life: ground, decor, boats, day and night ----------------
+
+const ALL_CELLS = []
+for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) ALL_CELLS.push([x, y])
+ALL_CELLS.sort((a, b) => (a[0] + a[1]) - (b[0] + b[1]) || a[0] - b[0])
+
+const hash = (x, y) => { let n = x * 374761393 + y * 668265263; n = (n ^ (n >>> 13)) * 1274126177; return ((n ^ (n >>> 16)) >>> 0) / 4294967296 }
+/** Sand within a few cells of the sea, a little ragged; grass inland. Same for every client. */
+export const isSand = (x, y) => Math.min(x, y, SIZE - 1 - x, SIZE - 1 - y) < 2 + Math.floor(hash(x, y) * 2.2)
+
+function drawDecor(ctx, x, y, sx, sy, w, h, t) {
+  const r = hash(x + 101, y + 7)
+  const sand = isSand(x, y)
+  if (r > (sand ? 0.1 : 0.17)) return
+  const pick = hash(x + 3, y + 911)
+  const name = sand ? (pick < 0.45 ? "deco-grass" : pick < 0.8 ? "deco-palm" : "deco-rocks")
+    : (pick < 0.32 ? "deco-pines" : pick < 0.52 ? "deco-flowers" : pick < 0.7 ? "deco-rocks" : pick < 0.84 ? "deco-palm" : pick < 0.93 ? "deco-grass" : "deco-bench")
+  const sprite = img[name]
+  if (!sprite?.complete || !sprite.naturalWidth) return
+  const scale = { "deco-pines": 0.62, "deco-palm": 0.62, "deco-rocks": 0.42, "deco-flowers": 0.38, "deco-grass": 0.34, "deco-bench": 0.42 }[name]
+  const sw = w * scale, sh = sw * (sprite.naturalHeight / sprite.naturalWidth)
+  const sway = name === "deco-palm" || name === "deco-grass" ? Math.sin(t * 1.2 + x) * 0.03 : 0
+  ctx.save(); ctx.translate(sx + (hash(x, y + 5) - 0.5) * w * 0.25, sy + h * 0.62); ctx.rotate(sway)
+  ctx.drawImage(sprite, -sw / 2, -sh, sw, sh); ctx.restore()
+}
+
+const BOATS = [{ k: "boat-sail", side: 0, at: 0.2, speed: 0.012 }, { k: "boat-row", side: 1, at: 0.55, speed: -0.008 }, { k: "boat-sail", side: 1, at: 0.15, speed: 0.01 }, { k: "boat-row", side: 0, at: 0.8, speed: -0.006 }]
+function drawBoats(view, w, h, t) {
+  const { ctx } = view
+  for (const b of BOATS) {
+    const sprite = img[b.k]; if (!sprite?.complete || !sprite.naturalWidth) continue
+    const along = (((b.at + t * b.speed) % 1) + 1) % 1 * 36 - 2
+    const off = 34.5 + Math.sin(t * 0.7 + b.at * 9) * 0.6
+    const { sx, sy } = b.side === 0 ? view.toScreen(off, along) : view.toScreen(along, off)
+    const sw = w * (b.k === "boat-sail" ? 0.7 : 0.55), sh = sw * (sprite.naturalHeight / sprite.naturalWidth)
+    const bob = Math.sin(t * 2 + b.at * 7) * 2.5 * view.zoom
+    ctx.save(); ctx.translate(sx, sy + bob); if (b.speed < 0) ctx.scale(-1, 1)
+    ctx.drawImage(sprite, -sw / 2, -sh * 0.85, sw, sh); ctx.restore()
+  }
+}
+
+/** Day and night from the viewer's own clock (or ?t=night|dusk|day for a fixed look). */
+export function skyPhase() {
+  const forced = new URLSearchParams(location.search).get("t")
+  if (forced) return { night: 1, dusk: 0.6, day: 0 }[forced] ?? 0
+  const hr = new Date().getHours() + new Date().getMinutes() / 60
+  if (hr >= 21 || hr < 5) return 1
+  if (hr >= 19) return 0.5 + (hr - 19) / 4
+  if (hr < 7) return 1 - (hr - 5) / 2
+  return 0
+}
+function drawSky(view, world, head, w, h, t) {
+  const { ctx } = view
+  const n = skyPhase(); if (n <= 0.02) return
+  ctx.save()
+  ctx.globalCompositeOperation = "multiply"
+  ctx.fillStyle = n < 0.7 ? `rgba(240,170,120,${0.25 * n})` : `rgba(40,58,110,${0.55 * n})`
+  ctx.fillRect(0, 0, innerWidth, innerHeight)
+  ctx.globalCompositeOperation = "lighter"
+  // lit windows: every house that is still afloat glows a little
+  for (const c of world.cells.values()) {
+    const s = c.structure; if (!s || s.kind !== "home" || s.expiresAt <= head) continue
+    const { sx, sy } = view.toScreen(c.x, c.y)
+    const g = ctx.createRadialGradient(sx, sy + h * 0.1, 2, sx, sy + h * 0.1, w * 0.45)
+    const flick = 0.85 + 0.15 * Math.sin(t * 6 + c.x)
+    g.addColorStop(0, `rgba(255,200,120,${0.45 * n * flick})`); g.addColorStop(1, "rgba(255,200,120,0)")
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(sx, sy + h * 0.1, w * 0.45, 0, Math.PI * 2); ctx.fill()
+  }
+  // stars over the sea
+  if (n > 0.6) for (let i = 0; i < 60; i++) {
+    const x = hash(i, 1) * innerWidth, y = hash(i, 2) * innerHeight * 0.5
+    ctx.fillStyle = `rgba(255,255,240,${(0.3 + 0.4 * Math.sin(t * 2 + i)) * n})`; ctx.fillRect(x, y, 1.6, 1.6)
+  }
+  ctx.restore()
 }
