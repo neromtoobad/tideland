@@ -46,6 +46,9 @@ writes, and [`api/rpc.js`](api/rpc.js), a read-only relay the client uses only i
 
 | Feature | What the player sees | Code |
 |---|---|---|
+| **Presence as a lease** | Your islander's position is a 10-minute entity, patched and extended in one batch when you stop walking; close the tab and you fade from the square. | [`movePresence()`](shared/tideland.js), [`walk.js`](web/src/walk.js) |
+| **60-second speech** | Chat bubbles are entities that live one minute: the conversation literally evaporates. | [`say()`](shared/tideland.js) |
+| **The live layer is a range query** | While walking, socket events re-read only `$expiresAt < now + 1 h`, which is exactly the presence and speech. | [`nowQuery`](shared/tideland.js) |
 | **Needs as lifetimes** | Food 8 h, rest 12 h, friends 24 h, home 3 d: the islander's mood, pose and need bars are just which entities are still alive. | [`needsOf()`](shared/tideland.js) |
 | **Batch: create + transfer in one tx** | A visitor cooks a meal and hands it over: the meal's key is predicted, created, and `changeOwnership`-ed to your islander in the same batch. | [`visit()`](shared/tideland.js) |
 | **`patchEntity`** | Older homes were patched in place to gain an islander; homes are deliberately not `readonly`. | [`scripts/bots.mjs`](scripts/bots.mjs) |

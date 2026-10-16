@@ -14,7 +14,7 @@ draws the same world. Our web client is one implementation; [`cli/tide.mjs`](../
 |---|---|---|---|
 | `app` | `str` | `"tideland"` | Namespace filter, every query starts with it |
 | `world` | `str` | `"s1"` (season) | A new season is a new world without touching old data |
-| `kind` | `str` | `home` · `meal` · `sleep` · `visit` · `tend` · `parcel` · `structure` · `inscription` · `guild` · `run` | Type filter |
+| `kind` | `str` | `home` · `meal` · `sleep` · `visit` · `presence` · `say` · `tend` · `parcel` · `structure` · `inscription` · `guild` · `run` | Type filter |
 
 Coordinates are **numbers** so regions are range queries: `x` and `y` are `i32` in `0..31`.
 
@@ -56,6 +56,23 @@ which is what makes the hand-over possible in one transaction.
 
 Homes built before islanders existed were **patched in place** (`patchEntity` setting `look` and the islander's name):
 homes are deliberately not `readonly`.
+
+### The live layer: `presence` and `say`
+
+| | `presence` (where an islander is standing) | `say` (something they said) |
+|---|---|---|
+| Attributes | `home key`, `x i32`, `y i32`, `look str` | `home key`, `x i32`, `y i32` |
+| Payload | `{ "name": "Pip" }` | `{ "text": "Anyone got fish?" }` (max 90 chars) |
+| Lifetime | **10 minutes** (players), 25 minutes (villager bots) | **60 seconds** |
+| Flags | none: it is patched as you move | `readonly` |
+| Written | when you arrive somewhere: **one batch** of `patches` (x, y) + `extensions` (another 10 minutes) | when you press Say |
+
+Walking itself is local; only where you *stop* is written. If you close the tab, your presence simply expires and your
+islander is gone from the square. Speech bubbles are drawn for exactly as long as their entity lives.
+
+While you walk, live socket events trigger one cheap query instead of a full re-read:
+`app = 'tideland' AND world = 's1' AND $expiresAt < u64(NOW + 1800)`. Everything short-lived (presence, speech,
+whatever is about to sink) is by definition in it.
 
 ### `tend` — one save, a line in the guestbook
 
