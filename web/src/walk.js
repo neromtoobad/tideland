@@ -2,8 +2,8 @@
 // fish at the water, sleep at home, knock on a neighbour's door. Your position is a 10-minute presence
 // entity (patched + extended in one batch when you arrive somewhere), and what you say is a 60-second
 // entity that evaporates. Other islanders' presence and speech arrive over the live socket.
-import { COMMONS, SIZE, PRESENCE_SECONDS, SAY_SECONDS, createPresence, movePresence, say, fish, needsOf, lifetimeBlocks, blocksToText, NEEDS } from "../../shared/tideland.js"
-import { spriteUrl } from "./render.js"
+import { solidAt, COMMONS, SIZE, PRESENCE_SECONDS, SAY_SECONDS, createPresence, movePresence, say, fish, needsOf, lifetimeBlocks, blocksToText, NEEDS } from "../../shared/tideland.js"
+import { spriteUrl, decorAt, SOLID_DECOR } from "./render.js"
 import { poseSprite } from "./house.js"
 import { sfx } from "./sfx.js"
 import { celebrate } from "./celebrate.js"
@@ -25,7 +25,7 @@ export function createWalk(deps) {
     if (!h) return false
     me.home = h
     if (!me.active) {
-      me.pos = { x: Math.min(31, h.x + 1.1), y: Math.min(31, h.y + 1.1) }
+      me.pos = frontOf(h)
       const p = myPresence()
       if (p) { me.presenceKey = p.key; me.pos = { x: p.x + 0.5, y: p.y + 0.5 }; me.synced = { x: p.x, y: p.y } }
     }
@@ -39,6 +39,53 @@ export function createWalk(deps) {
   const myPresence = () => [...state.things.values()].filter((t) => t.kind === "presence" && t.home === me.home?.key && same(t.owner, state.wallet?.address) && t.expiresAt > headNow())
     .sort((a, b) => (a.expiresAt < b.expiresAt ? 1 : -1))[0]
 
+  // ---------- the solid world: houses, trees and rocks block the way ----------
+
+  const solid = (cx, cy) => solidAt(state.cells, cx, cy)
+  const cellOf = (p) => ({ x: Math.floor(p.x), y: Math.floor(p.y) })
+
+  /** A* over the grid (8 directions, no cutting corners). Returns cell centres to walk through, or null. */
+  function findPath(from, to) {
+    const goal = solid(to.x, to.y) ? nearestOpen(to) : to
+    if (!goal) return null
+    const key = (x, y) => y * SIZE + x
+    const open = [{ x: from.x, y: from.y, g: 0, f: 0 }], came = new Map(), g = new Map([[key(from.x, from.y), 0]])
+    const hfn = (x, y) => Math.hypot(goal.x - x, goal.y - y)
+    for (let guard = 0; open.length && guard < 4000; guard++) {
+      open.sort((a, b) => a.f - b.f)
+      const cur = open.shift()
+      if (cur.x === goal.x && cur.y === goal.y) {
+        const path = []; let k = key(cur.x, cur.y)
+        while (came.has(k)) { path.unshift({ x: (k % SIZE) + 0.5, y: Math.floor(k / SIZE) + 0.5 }); k = came.get(k) }
+        return path
+      }
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+        const nx = cur.x + dx, ny = cur.y + dy
+        if (solid(nx, ny) || (dx && dy && (solid(cur.x + dx, cur.y) || solid(cur.x, cur.y + dy)))) continue
+        const ng = g.get(key(cur.x, cur.y)) + (dx && dy ? 1.414 : 1)
+        if (ng < (g.get(key(nx, ny)) ?? Infinity)) { g.set(key(nx, ny), ng); came.set(key(nx, ny), key(cur.x, cur.y)); open.push({ x: nx, y: ny, f: ng + hfn(nx, ny) }) }
+      }
+    }
+    return null
+  }
+  function nearestOpen(c) {
+    for (let r = 1; r < 4; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      // prefer the cells in front (screen-down is +x +y)
+      const x = c.x + dx, y = c.y + dy
+      if (!solid(x, y)) return { x, y }
+    }
+    return null
+  }
+  /** Walk to a point, around anything solid. */
+  function walkTo(p) {
+    const path = findPath(cellOf(me.pos), cellOf(p))
+    if (!path) { toast("Can't find a way there.", 2000); return false }
+    const last = path[path.length - 1]
+    me.path = path; me.goal = path.shift() ?? null
+    if (!me.goal) arrive()
+    return last
+  }
+
   // ---------- per frame ----------
 
   function update(dt) {
@@ -48,11 +95,17 @@ export function createWalk(deps) {
     const before = { ...me.pos }
     if (vx || vy) {
       const gx = vx + vy, gy = vy - vx, n = Math.hypot(gx, gy) || 1
-      me.pos.x += (gx / n) * SPEED * dt; me.pos.y += (gy / n) * SPEED * dt; me.goal = null
+      const nx = me.pos.x + (gx / n) * SPEED * dt, ny = me.pos.y + (gy / n) * SPEED * dt
+      // slide along walls: try both axes, then each alone
+      const stuck = solid(Math.floor(me.pos.x), Math.floor(me.pos.y)) // standing somewhere that became solid: let them out
+      if (stuck || !solid(Math.floor(nx), Math.floor(ny))) { me.pos.x = nx; me.pos.y = ny }
+      else if (!solid(Math.floor(nx), Math.floor(me.pos.y))) me.pos.x = nx
+      else if (!solid(Math.floor(me.pos.x), Math.floor(ny))) me.pos.y = ny
+      me.goal = null; me.path = []
       if (vx) me.facing = Math.sign(vx)
     } else if (me.goal) {
       const dx = me.goal.x - me.pos.x, dy = me.goal.y - me.pos.y, d = Math.hypot(dx, dy)
-      if (d < 0.05) { me.goal = null; arrive() }
+      if (d < 0.05) { me.goal = me.path?.length ? me.path.shift() : null; if (!me.goal) arrive() }
       else { const st = Math.min(d, SPEED * dt); me.pos.x += (dx / d) * st; me.pos.y += (dy / d) * st; me.facing = dx - dy >= 0 ? 1 : -1 }
     }
     me.pos.x = Math.max(0.2, Math.min(31.8, me.pos.x)); me.pos.y = Math.max(0.2, Math.min(31.8, me.pos.y))
@@ -61,9 +114,15 @@ export function createWalk(deps) {
     if (was && !me.moving && !me.goal) arrive()
     // others glide toward where they last said they were
     for (const p of presences()) {
-      const s = smooth.get(p.key) ?? { x: p.x + 0.5, y: p.y + 0.5 }
-      const tx = p.x + 0.5, ty = p.y + 0.5, d = Math.hypot(tx - s.x, ty - s.y)
-      if (d > 0.02) { const st = Math.min(d, SPEED * dt); s.x += ((tx - s.x) / d) * st; s.y += ((ty - s.y) / d) * st; s.facing = tx - s.x - (ty - s.y) >= 0 ? 1 : -1; s.moving = true } else s.moving = false
+      const s = smooth.get(p.key) ?? { x: p.x + 0.5, y: p.y + 0.5, path: [] }
+      if (s.tx !== p.x || s.ty !== p.y) { s.tx = p.x; s.ty = p.y; s.path = findPath(cellOf(s), { x: p.x, y: p.y }) ?? [{ x: p.x + 0.5, y: p.y + 0.5 }] }
+      const wp = s.path[0]
+      if (wp) {
+        const d = Math.hypot(wp.x - s.x, wp.y - s.y)
+        if (d < 0.05) s.path.shift()
+        else { const st = Math.min(d, SPEED * dt); s.x += ((wp.x - s.x) / d) * st; s.y += ((wp.y - s.y) / d) * st; s.facing = wp.x - s.x - (wp.y - s.y) >= 0 ? 1 : -1 }
+        s.moving = true
+      } else s.moving = false
       smooth.set(p.key, s)
     }
     renderAction()
@@ -160,14 +219,16 @@ export function createWalk(deps) {
     if (t.id === "help" && t.key) { const h = state.things.get(t.key); return h ? { x: h.x + 0.5, y: h.y + 0.5, label: "Help" } : null }
     return null
   }
+  /** The doorstep: the open cell in front of a house (screen-down), or the nearest open one. */
+  const frontOf = (h) => { const c = [[1, 1], [1, 0], [0, 1], [-1, 1], [1, -1]].map(([dx, dy]) => ({ x: h.x + dx, y: h.y + dy })).find((c) => !solid(c.x, c.y)) ?? nearestOpen(h) ?? h; return { x: c.x + 0.5, y: c.y + 0.5 } }
   const shore = () => { const a = { x: 29.4, y: me.pos.y }, b = { x: me.pos.x, y: 29.4 }; return Math.hypot(a.x - me.pos.x, a.y - me.pos.y) < Math.hypot(b.x - me.pos.x, b.y - me.pos.y) ? a : b }
 
   function go(id) {
     const t = tasks().find((x) => x.id === id); if (!t) return
-    if (id === "fish") { me.goal = shore(); me.openOnArrival = null }
-    else if (id === "sleep") { me.goal = { x: Math.min(31.5, me.home.x + 1.2), y: Math.min(31.5, me.home.y + 1.2) }; me.openOnArrival = null }
+    if (id === "fish") { me.openOnArrival = null; walkTo(shore()) }
+    else if (id === "sleep") { me.openOnArrival = null; walkTo(frontOf(me.home)) }
     else if (id === "friend") house.open(me.home.key, { panel: true })
-    else if (id === "help" && t.key) { const h = state.things.get(t.key); me.goal = { x: Math.min(31.5, h.x + 1.2), y: Math.min(31.5, h.y + 1.2) }; me.openOnArrival = t.key }
+    else if (id === "help" && t.key) { const h = state.things.get(t.key); me.openOnArrival = t.key; walkTo(frontOf(h)) }
   }
 
   let celebrated = (() => { try { return localStorage.getItem("tideland.dayDone") } catch { return null } })()
@@ -246,8 +307,8 @@ export function createWalk(deps) {
     if (!me.active) return false
     const g = view.toGrid(px, py); if (!g) return true
     const s = state.cells.get(`${g.x}:${g.y}`)?.structure
-    if (s?.kind === "home") { me.goal = { x: Math.min(31.5, s.x + 1.2), y: Math.min(31.5, s.y + 1.2) }; me.openOnArrival = s.key === me.home?.key ? null : s.key }
-    else { me.goal = { x: g.x + 0.5, y: g.y + 0.5 }; me.openOnArrival = null }
+    if (s?.kind === "home") { me.openOnArrival = s.key === me.home?.key ? null : s.key; walkTo(frontOf(s)) }
+    else { me.openOnArrival = null; walkTo({ x: g.x + 0.5, y: g.y + 0.5 }) }
     return true
   }
   function key(e, down) {

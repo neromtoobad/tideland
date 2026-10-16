@@ -87,7 +87,7 @@ export function upgradeHome(wallet, { home, style }) {
 // ---------- Islanders: needs are entities ----------
 // Every islander lives in a home. Each need is satisfied by an entity whose lifetime IS the need's decay:
 // a meal feeds for 8 h, a night's sleep rests for 12 h, a friend's visit warms for 24 h, the house stands up to 3 days.
-export const LOOKS = ["carpenter", "mason", "lamplighter"]
+export const LOOKS = ["carpenter", "mason", "lamplighter", "fisher", "weaver", "baker", "sailor", "kid", "elder"]
 export const NEEDS = {
   food: { kind: "meal", seconds: 8 * 3600, label: "Food" },
   rest: { kind: "sleep", seconds: 12 * 3600, label: "Rest" },
@@ -120,7 +120,15 @@ export function sleep(wallet, { home }) {
  *  - optionally extend the home (keep it afloat) and write the tend record.
  * Creates lead the batch and ownership changes come last, so the meal's predicted key is transferable in the same tx.
  */
-export async function visit(wallet, reader, { home, note, dish, addBlocks = 0n }) {
+export async function visit(wallet, reader, args) {
+  try { return await visitOnce(wallet, reader, args) } catch (e) {
+    // someone else shored the house up first: our target would shorten it, so the whole batch reverted
+    // (no false visit, meal or signature). Re-read its expiry and stack our time on top, once.
+    if (!/shorten/i.test(String(e?.message))) throw e
+    return visitOnce(wallet, reader, { ...args, home: toThing(await reader.getEntity(args.home.key)) })
+  }
+}
+async function visitOnce(wallet, reader, { home, note, dish, addBlocks = 0n }) {
   const creates = [needCreate("visit", home.key, NEEDS.friends.seconds, { note: String(note ?? "").slice(0, 80) })]
   const ownershipChanges = []
   const extensions = []
@@ -532,4 +540,30 @@ export function sell(wallet, { parcel, structure, to }) {
   const ownershipChanges = [{ entityKey: parcel.key, newOwner: to }]
   if (structure && structure.owner?.toLowerCase() === parcel.owner?.toLowerCase()) ownershipChanges.push({ entityKey: structure.key, newOwner: to })
   return wallet.executeBatch({ ownershipChanges })
+}
+
+// ---------- The island's layout (decor, sand, what is solid). Pure, so every client and bot agree. ----------
+export const hash = (x, y) => { let n = x * 374761393 + y * 668265263; n = (n ^ (n >>> 13)) * 1274126177; return ((n ^ (n >>> 16)) >>> 0) / 4294967296 }
+/** Sand within a few cells of the sea, a little ragged; grass inland. Same for every client. */
+export const isSand = (x, y) => Math.min(x, y, SIZE - 1 - x, SIZE - 1 - y) < 2 + Math.floor(hash(x, y) * 2.2)
+
+/** Which decor (if any) grows on an empty cell. Deterministic, so every client draws the same island. */
+export function decorAt(x, y) {
+  const r = hash(x + 101, y + 7)
+  const sand = isSand(x, y)
+  if (r > (sand ? 0.06 : 0.1)) return null
+  const pick = hash(x + 3, y + 911)
+  return sand ? (pick < 0.45 ? "deco-grass" : pick < 0.8 ? "deco-palm" : "deco-rocks")
+    : (pick < 0.32 ? "deco-pines" : pick < 0.52 ? "deco-flowers" : pick < 0.7 ? "deco-rocks" : pick < 0.84 ? "deco-palm" : pick < 0.93 ? "deco-grass" : "deco-bench")
+}
+/** Decor you can't walk through. */
+export const SOLID_DECOR = new Set(["deco-pines", "deco-palm", "deco-rocks", "deco-bench"])
+
+
+/** Can an islander stand here? Houses and structures, trees, rocks and benches are solid. */
+export function solidAt(cells, x, y) {
+  if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) return true
+  const c = cells.get(`${x}:${y}`)
+  if (c?.structure) return true
+  return !c?.parcel && !c?.inscriptions?.length && SOLID_DECOR.has(decorAt(x, y))
 }

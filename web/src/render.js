@@ -1,11 +1,12 @@
 // Isometric canvas renderer. Pure drawing: it reads the world model and never touches Arkiv.
-import { SIZE, lifeLeft, BLOCK_SECONDS, MATERIALS, COMMONS } from "../../shared/tideland.js"
+import { SIZE, lifeLeft, BLOCK_SECONDS, MATERIALS, COMMONS, hash, isSand, decorAt, SOLID_DECOR } from "../../shared/tideland.js"
+export { decorAt, SOLID_DECOR }
 
 const TW = 96, TH = 48 // tile diamond at zoom 1
 const POSES = ["", "-hungry", "-sleepy", "-sleeping", "-eating", "-waving"]
 const DECOR = ["deco-palm", "deco-pines", "deco-rocks", "deco-flowers", "deco-grass", "deco-bench", "boat-row", "boat-sail"]
 const SPRITES = ["driftwood", "pine", "stone", "monument", "lighthouse", "plot", "inscription", "buoy", "jetty", "seawall", "stew", ...DECOR,
-  ...["carpenter", "mason", "lamplighter"].flatMap((l) => POSES.map((p) => l + p)),
+  ...["carpenter", "mason", "lamplighter", "fisher", "weaver", "baker", "sailor", "kid", "elder"].flatMap((l) => [...POSES, "-sad"].map((p) => l + p).concat([0, 1, 2, 3].map((i) => `${l}-walk-${i}`))),
   "carpenter", "carpenter-sad", "mason", "mason-sad", "lamplighter", "lamplighter-sad"]
 const img = {}
 export const spriteUrl = (n) => `/sprites/${n}.webp`
@@ -101,10 +102,14 @@ export function draw(view, world) {
     diamond(ctx, sx, sy, w, h); ctx.fill()
   }
 
-  // depth-sorted objects
-  const order = ALL_CELLS
-  const actors = [], islanders = []
-  for (const [cx, cy] of order) {
+  // figures: every islander, whether pottering by their home or walking about, depth-sorted with the world
+  const figures = zoom >= 0.45 && !run ? collectFigures(view, world, scene, head, t) : []
+  figures.sort((p, q) => p.depth - q.depth)
+  let fi = 0
+
+  // depth-sorted world: tiles' objects and figures interleaved, so you pass behind houses and trees
+  for (const [cx, cy] of ALL_CELLS) {
+    while (fi < figures.length && figures[fi].depth < cx + cy + 1) drawFigure(ctx, view, figures[fi++], w, h, t)
     const { sx, sy } = view.toScreen(cx, cy)
     if (sx < -w * 2 || sx > innerWidth + w * 2 || sy < -h * 6 || sy > innerHeight + h * 2) continue
     const c = world.cells.get(`${cx}:${cy}`)
@@ -113,10 +118,6 @@ export function draw(view, world) {
     if (s) {
       drawThing(ctx, s.material, s, head, sx, sy, w, h, t)
       if (s.material === "lighthouse" && s.expiresAt > head) drawBeam(ctx, s, head, sx, sy, w, t)
-      if (s.kind === "home") islanders.push({ c, s, mood: world.moods.get(s.key) ?? "happy" })
-      const guild = world.guilds.get(s.guild)
-      const ch = characterFor(guild)
-      if (ch) actors.push({ c, s, ch })
     } else if (c.parcel) {
       drawThing(ctx, "plot", c.parcel, head, sx, sy, w, h, t)
     } else if (c.inscriptions.length) {
@@ -126,25 +127,14 @@ export function draw(view, world) {
       ctx.fillStyle = "#b4552e"; ctx.beginPath(); ctx.arc(sx + w * 0.32, sy + h * 0.2, 5 * zoom, 0, Math.PI * 2); ctx.fill()
     }
   }
-
-  // villagers: one beside each guild house; sad when it sinks within a day
-  const DAY = 43200n
-  const shown = zoom < 0.45 || view.run ? [] : actors.filter((a) => a.s.expiresAt - head < DAY || parseInt(a.s.key.slice(-2), 16) % 3 === 0)
-  for (const a of shown) {
-    const sad = a.s.expiresAt - head < DAY
-    const sprite = img[`${a.ch}${sad ? "-sad" : ""}`]
-    if (!sprite?.complete) continue
-    const { sx, sy } = view.toScreen(a.c.x, a.c.y)
-    const cw = w * 0.34, chh = cw * (sprite.naturalHeight / sprite.naturalWidth)
-    const bob = sad ? 0 : Math.sin(t * 3 + a.c.x) * 1.5 * zoom
-    ctx.drawImage(sprite, sx + w * 0.14, sy + h * 0.95 - chh + bob, cw, chh)
-  }
+  while (fi < figures.length) drawFigure(ctx, view, figures[fi++], w, h, t)
 
   if (run) drawRunLayer(view, world, run, head, w, h, t, now)
-  if (scene && !run) drawWalkers(view, scene, w, h, t)
 
   drawBoats(view, w, h, t)
   drawSky(view, world, head, w, h, t)
+  // labels go on top of everything so they stay readable
+  drawOverlays(ctx, view, figures, scene, w, h, t)
 
   // splashes: rings where something just went under
   view.splashes = view.splashes.filter((p) => now - p.at < 3500)
@@ -154,32 +144,6 @@ export function draw(view, world) {
       const q = k - off; if (q <= 0) continue
       ctx.strokeStyle = `rgba(255,255,255,${(1 - q) * 0.9})`; ctx.lineWidth = 2.5 * zoom
       ctx.beginPath(); ctx.ellipse(sx, sy + h / 2, w * (0.2 + q * 0.7), h * (0.2 + q * 0.7), 0, 0, Math.PI * 2); ctx.stroke()
-    }
-  }
-
-  // islanders: each one beside their home, pose and bubble from their needs, pottering about a little
-  const walking = new Set(scene ? [scene.me.home?.key, ...scene.others.map((o) => o.home)] : [])
-  if (zoom >= 0.45 && !view.run) {
-    const BUBBLE = { hungry: "🍲", sleepy: "💤", sad: "💧", sleeping: "💤", eating: "😋", waving: "👋" }
-    for (const { c, s, mood } of islanders) {
-      if (walking.has(s.key)) continue // out and about: drawn where they actually are
-      const suffix = { happy: "", hungry: "-hungry", sleepy: "-sleepy", sad: "-sad", sleeping: "-sleeping", eating: "-eating", waving: "-waving" }[mood] ?? ""
-      const sprite = img[`${s.look || "carpenter"}${suffix}`]
-      if (!sprite?.complete || !sprite.naturalWidth) continue
-      const seed = parseInt(s.key.slice(-4), 16)
-      const still = mood === "sleeping" || mood === "eating" || mood === "sad"
-      const wx = still ? 0.55 : 0.55 + 0.25 * Math.sin(t * 0.35 + seed), wy = still ? 0.9 : 0.9 + 0.2 * Math.cos(t * 0.3 + seed)
-      const { sx, sy } = view.toScreen(c.x + wx, c.y + wy)
-      const cw = w * (mood === "sleeping" ? 0.5 : 0.36), chh = cw * (sprite.naturalHeight / sprite.naturalWidth)
-      const hop = still ? 0 : Math.abs(Math.sin(t * 4 + seed)) * 2 * zoom
-      ctx.drawImage(sprite, sx - cw / 2, sy - chh - hop, cw, chh)
-      const b = BUBBLE[mood]
-      if (b) {
-        const bx = sx + cw * 0.35, by = sy - chh - 6 * zoom, r = 9 * zoom
-        ctx.fillStyle = "rgba(251,252,250,.95)"; ctx.beginPath(); ctx.arc(bx, by, r, 0, Math.PI * 2); ctx.fill()
-        ctx.strokeStyle = "rgba(27,43,42,.15)"; ctx.lineWidth = 1; ctx.stroke()
-        ctx.font = `${Math.round(11 * zoom)}px sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(b, bx, by + 0.5)
-      }
     }
   }
 
@@ -364,54 +328,96 @@ function followMe(view, me) {
 }
 
 const SUFFIX = { happy: "", hungry: "-hungry", sleepy: "-sleepy", sad: "-sad", sleeping: "-sleeping", eating: "-eating", waving: "-waving" }
+const MOOD_BUBBLE = { hungry: "🍲", sleepy: "💤", sad: "💧", sleeping: "💤", eating: "😋", waving: "👋" }
 
-function drawWalkers(view, scene, w, h, t) {
-  const { ctx } = view
-  // the next thing to do: a bouncing pin where to go
-  if (scene.target) {
-    const { sx, sy } = view.toScreen(scene.target.x, scene.target.y)
-    const bob = Math.abs(Math.sin(t * 3)) * 10 * view.zoom, py = sy - h * 1.5 - bob
-    ctx.save()
-    ctx.fillStyle = "rgba(31,110,104,.18)"; ctx.beginPath(); ctx.ellipse(sx, sy, w * 0.35 * (1 - bob / 40), h * 0.3 * (1 - bob / 40), 0, 0, Math.PI * 2); ctx.fill()
-    ctx.fillStyle = "#1f6e68"; ctx.beginPath(); ctx.arc(sx, py, 13 * view.zoom, Math.PI, 0); ctx.lineTo(sx, py + 22 * view.zoom); ctx.closePath(); ctx.fill()
-    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(sx, py, 5 * view.zoom, 0, Math.PI * 2); ctx.fill()
-    ctx.font = `700 ${Math.round(11 * view.zoom)}px "Albert Sans", sans-serif`; ctx.textAlign = "center"
-    const lw = ctx.measureText(scene.target.label).width + 14
-    ctx.fillStyle = "#1f6e68"; roundRect(ctx, sx - lw / 2, py - 36 * view.zoom, lw, 18 * view.zoom, 9 * view.zoom); ctx.fill()
-    ctx.fillStyle = "#fff"; ctx.textBaseline = "middle"; ctx.fillText(scene.target.label, sx, py - 27 * view.zoom)
-    ctx.restore()
+/** A pose for a look, falling back sensibly when a look lacks that pose (new looks share one "sad"). */
+function poseImg(look, mood) {
+  const l = look || "carpenter"
+  const tryNames = [`${l}${SUFFIX[mood] ?? ""}`, ...(mood === "hungry" || mood === "sleepy" ? [`${l}-sad`] : []), l, "carpenter"]
+  for (const n of tryNames) { const i = img[n]; if (i?.complete && i.naturalWidth) return i }
+  return null
+}
+function walkFrame(look, t) {
+  const i = img[`${look || "carpenter"}-walk-${Math.floor(t * 8) % 4}`]
+  return i?.complete && i.naturalWidth ? i : null
+}
+
+function collectFigures(view, world, scene, head, t) {
+  const out = []
+  const walking = new Set(scene ? [scene.me.home?.key, ...scene.others.map((o) => o.home)] : [])
+  for (const c of world.cells.values()) {
+    const s = c.structure
+    if (!s || s.kind !== "home" || s.expiresAt <= head || walking.has(s.key)) continue
+    const mood = world.moods.get(s.key) ?? "happy"
+    const seed = parseInt(s.key.slice(-4), 16)
+    const still = mood === "sleeping" || mood === "eating" || mood === "sad"
+    const px = c.x + 1.0 + (still ? 0 : 0.15 * Math.sin(t * 0.35 + seed)), py = c.y + 0.75 + (still ? 0 : 0.15 * Math.cos(t * 0.3 + seed))
+    out.push({ kind: "home", pos: { x: px, y: py }, depth: px + py, look: s.look, mood, name: s.data?.islander, home: s.key, scale: mood === "sleeping" ? 0.5 : 0.42 })
   }
-  const all = [...scene.others.map((o) => ({ ...o, mine: false })), { home: scene.me.home?.key, look: scene.me.home?.look, name: scene.me.name, pos: scene.me.pos, mood: scene.me.mood, facing: scene.me.facing, moving: scene.me.moving, mine: true, fishing: !!scene.me.fishing }]
-  all.sort((a, b) => (a.pos.x + a.pos.y) - (b.pos.x + b.pos.y))
-  for (const a of all) {
-    const moving = a.mine ? a.moving : a.pos.moving
-    const mood = moving ? "happy" : a.mood || "happy"
-    const sprite = img[`${a.look || "carpenter"}${SUFFIX[mood] ?? ""}`] || img[a.look || "carpenter"]
-    if (!sprite?.complete || !sprite.naturalWidth) continue
-    const { sx, sy } = view.toScreen(a.pos.x, a.pos.y)
-    const cw = w * (a.mine ? 0.64 : 0.54), chh = cw * (sprite.naturalHeight / sprite.naturalWidth)
-    const hop = moving ? Math.abs(Math.sin(t * 11 + (a.pos.x || 0))) * 5 * view.zoom : 0
-    ctx.save()
-    ctx.fillStyle = "rgba(27,43,42,.2)"; ctx.beginPath(); ctx.ellipse(sx, sy, cw * 0.3, cw * 0.1, 0, 0, Math.PI * 2); ctx.fill()
-    if (a.mine) { ctx.strokeStyle = "rgba(31,110,104,.55)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(sx, sy, cw * 0.42, cw * 0.15, 0, 0, Math.PI * 2); ctx.stroke() }
-    ctx.translate(sx, sy - hop); ctx.scale(((a.mine ? a.facing : a.pos.facing) ?? 1) < 0 ? -1 : 1, 1)
-    ctx.drawImage(sprite, -cw / 2, -chh, cw, chh)
-    ctx.restore()
-    // name tag: you always; others only when they're near you, to keep the screen calm
-    const near = a.mine || Math.hypot(a.pos.x - scene.me.pos.x, a.pos.y - scene.me.pos.y) < 6
-    if (a.name && near) {
+  if (scene) {
+    for (const o of scene.others) out.push({ kind: "other", pos: o.pos, depth: o.pos.x + o.pos.y, look: o.look, mood: o.mood, name: o.name, home: o.home, moving: o.pos.moving, facing: o.pos.facing, scale: 0.54 })
+    const me = scene.me
+    out.push({ kind: "me", pos: me.pos, depth: me.pos.x + me.pos.y, look: me.home?.look, mood: me.mood, name: me.name, home: me.home?.key, moving: me.moving, facing: me.facing, scale: 0.64, mine: true })
+  }
+  return out
+}
+
+function drawFigure(ctx, view, f, w, h, t) {
+  const { sx, sy } = view.toScreen(f.pos.x, f.pos.y)
+  if (sx < -w || sx > innerWidth + w || sy < -h * 4 || sy > innerHeight + h * 4) return
+  const walkImg = f.moving ? walkFrame(f.look, t + (f.pos.x || 0)) : null
+  const sprite = walkImg || poseImg(f.look, f.moving ? "happy" : f.mood || "happy")
+  if (!sprite) return
+  const cw = w * f.scale * (walkImg ? 1.05 : 1), chh = cw * (sprite.naturalHeight / sprite.naturalWidth)
+  const hop = f.moving && !walkImg ? Math.abs(Math.sin(t * 11 + (f.pos.x || 0))) * 5 * view.zoom : 0
+  ctx.save()
+  ctx.fillStyle = "rgba(27,43,42,.2)"; ctx.beginPath(); ctx.ellipse(sx, sy, cw * 0.3, cw * 0.1, 0, 0, Math.PI * 2); ctx.fill()
+  if (f.mine) { ctx.strokeStyle = "rgba(31,110,104,.55)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(sx, sy, cw * 0.42, cw * 0.15, 0, 0, Math.PI * 2); ctx.stroke() }
+  ctx.translate(sx, sy - hop); ctx.scale((f.facing ?? 1) < 0 ? -1 : 1, 1)
+  ctx.drawImage(sprite, -cw / 2, -chh, cw, chh)
+  ctx.restore()
+  f.top = { x: sx, y: sy - chh - hop } // where labels go
+}
+
+function drawOverlays(ctx, view, figures, scene, w, h, t) {
+  const me = scene?.me
+  for (const f of figures) {
+    if (!f.top) continue
+    const { x, y } = f.top
+    const said = scene?.says.get(f.home)
+    if (said) { drawSpeech(ctx, x, y - 8, said.data.text || "", view.zoom); continue }
+    const near = f.mine || !me || Math.hypot(f.pos.x - me.pos.x, f.pos.y - me.pos.y) < 6
+    if (f.name && near && (f.kind !== "home" || scene)) {
       ctx.save()
       ctx.font = `600 ${Math.round(10.5 * Math.min(1.3, view.zoom))}px "Albert Sans", sans-serif`; ctx.textAlign = "center"
-      const tw = ctx.measureText(a.name).width + 12, ty = sy + 14 * view.zoom
-      ctx.fillStyle = a.mine ? "rgba(31,110,104,.92)" : "rgba(251,252,250,.92)"
-      roundRect(ctx, sx - tw / 2, ty - 10, tw, 16, 8); ctx.fill()
-      ctx.fillStyle = a.mine ? "#fff" : "#1b2b2a"; ctx.fillText(a.name, sx, ty + 2)
+      const tw = ctx.measureText(f.name).width + 12, ty = view.toScreen(f.pos.x, f.pos.y).sy + 14 * view.zoom
+      ctx.fillStyle = f.mine ? "rgba(31,110,104,.92)" : "rgba(251,252,250,.92)"
+      roundRect(ctx, x - tw / 2, ty - 10, tw, 16, 8); ctx.fill()
+      ctx.fillStyle = f.mine ? "#fff" : "#1b2b2a"; ctx.fillText(f.name, x, ty + 2)
       ctx.restore()
     }
-    // speech bubble: lives exactly as long as its 60-second entity
-    const said = scene.says.get(a.home)
-    if (said) drawSpeech(ctx, sx, sy - chh - hop - 8, said.data.text || "", view.zoom)
+    const b = !f.moving && MOOD_BUBBLE[f.mood]
+    if (b && near) {
+      const bx = x + 14 * view.zoom, by = y - 4 * view.zoom, r = 9 * view.zoom
+      ctx.fillStyle = "rgba(251,252,250,.95)"; ctx.beginPath(); ctx.arc(bx, by, r, 0, Math.PI * 2); ctx.fill()
+      ctx.font = `${Math.round(11 * view.zoom)}px sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(b, bx, by + 0.5)
+    }
   }
+  if (scene?.target) drawPin(ctx, view, scene.target, w, h, t)
+}
+
+function drawPin(ctx, view, target, w, h, t) {
+  const { sx, sy } = view.toScreen(target.x, target.y)
+  const bob = Math.abs(Math.sin(t * 3)) * 10 * view.zoom, py = sy - h * 1.5 - bob
+  ctx.save()
+  ctx.fillStyle = "rgba(31,110,104,.18)"; ctx.beginPath(); ctx.ellipse(sx, sy, w * 0.35 * (1 - bob / 40), h * 0.3 * (1 - bob / 40), 0, 0, Math.PI * 2); ctx.fill()
+  ctx.fillStyle = "#1f6e68"; ctx.beginPath(); ctx.arc(sx, py, 13 * view.zoom, Math.PI, 0); ctx.lineTo(sx, py + 22 * view.zoom); ctx.closePath(); ctx.fill()
+  ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(sx, py, 5 * view.zoom, 0, Math.PI * 2); ctx.fill()
+  ctx.font = `700 ${Math.round(11 * view.zoom)}px "Albert Sans", sans-serif`; ctx.textAlign = "center"
+  const lw = ctx.measureText(target.label).width + 14
+  ctx.fillStyle = "#1f6e68"; roundRect(ctx, sx - lw / 2, py - 36 * view.zoom, lw, 18 * view.zoom, 9 * view.zoom); ctx.fill()
+  ctx.fillStyle = "#fff"; ctx.textBaseline = "middle"; ctx.fillText(target.label, sx, py - 27 * view.zoom)
+  ctx.restore()
 }
 
 function drawSpeech(ctx, x, y, text, zoom) {
@@ -442,17 +448,9 @@ const ALL_CELLS = []
 for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) ALL_CELLS.push([x, y])
 ALL_CELLS.sort((a, b) => (a[0] + a[1]) - (b[0] + b[1]) || a[0] - b[0])
 
-const hash = (x, y) => { let n = x * 374761393 + y * 668265263; n = (n ^ (n >>> 13)) * 1274126177; return ((n ^ (n >>> 16)) >>> 0) / 4294967296 }
-/** Sand within a few cells of the sea, a little ragged; grass inland. Same for every client. */
-export const isSand = (x, y) => Math.min(x, y, SIZE - 1 - x, SIZE - 1 - y) < 2 + Math.floor(hash(x, y) * 2.2)
-
 function drawDecor(ctx, x, y, sx, sy, w, h, t) {
-  const r = hash(x + 101, y + 7)
-  const sand = isSand(x, y)
-  if (r > (sand ? 0.06 : 0.1)) return
-  const pick = hash(x + 3, y + 911)
-  const name = sand ? (pick < 0.45 ? "deco-grass" : pick < 0.8 ? "deco-palm" : "deco-rocks")
-    : (pick < 0.32 ? "deco-pines" : pick < 0.52 ? "deco-flowers" : pick < 0.7 ? "deco-rocks" : pick < 0.84 ? "deco-palm" : pick < 0.93 ? "deco-grass" : "deco-bench")
+  const name = decorAt(x, y)
+  if (!name) return
   const sprite = img[name]
   if (!sprite?.complete || !sprite.naturalWidth) return
   const scale = { "deco-pines": 0.62, "deco-palm": 0.62, "deco-rocks": 0.42, "deco-flowers": 0.38, "deco-grass": 0.34, "deco-bench": 0.42 }[name]

@@ -17,7 +17,7 @@ import {
   SIZE, MATERIALS, DAY_BLOCKS, publicClient, walletClient, collect, worldQuery, guildsQuery, layout, lifeLeft,
   claimAndBuild, renew, tend, inscribe, foundGuild, sell, build, placeCommons, COMMONS,
   buildHome, keepAfloat, homesQuery, HOME_STYLES, fish, sleep as goToBed, visit, lifeQuery, needsOf, DISHES,
-  createPresence, movePresence, LEVELS, signersOf, earnedLevel, upgradeHome,
+  createPresence, movePresence, LEVELS, signersOf, earnedLevel, upgradeHome, LOOKS, solidAt,
 } from "../shared/tideland.js"
 import { ExpirationTime, jsonToPayload } from "@arkiv-network/sdk"
 import { str } from "@arkiv-network/sdk/attr"
@@ -96,15 +96,15 @@ async function village() {
   const byCreator = (a) => homes.find((x) => x.creator.toLowerCase() === a.toLowerCase())
   for (const b of BOTS) {
     const mine = byCreator(b.account.address)
-    const look = LOOK_OF_GUILD[b.guild], islander = ISLANDERS[b.i % ISLANDERS.length]
+    const look = LOOKS[b.i % LOOKS.length], islander = ISLANDERS[b.i % ISLANDERS.length] // every villager looks different
     if (!mine) {
       const cell = freeCellNear(w, GUILDS[b.guild].home, 6); if (!cell) continue
       w.cells.set(`${cell.x}:${cell.y}`, { parcel: true })
       await safely(`${islander} moves in`, () => buildHome(b.wallet, { ...cell, name: HOME_NAMES[b.i % HOME_NAMES.length], style: pick(HOME_STYLES), islander, look }))
-    } else if (!mine.look) {
+    } else if (mine.look !== look) {
       // homes from before islanders existed: patch in who lives there (homes are not readonly)
       await safely(`${islander} settles into ${mine.data.name}`, () => b.wallet.patchEntity({
-        entityKey: mine.key, set: { look: str(look) }, payload: jsonToPayload({ ...mine.data, islander }), contentType: "application/json",
+        entityKey: mine.key, set: { look: str(look) }, payload: jsonToPayload({ ...mine.data, islander: mine.data?.islander || islander }), contentType: "application/json",
       }))
     }
   }
@@ -139,8 +139,12 @@ async function wander() {
   await Promise.all(BOTS.map(async (b) => {
     const home = homes.find((x) => x.creator.toLowerCase() === b.account.address.toLowerCase()); if (!home) return
     const goal = Math.random() < 0.35 ? pick(homes) : home
-    const x = Math.max(0, Math.min(31, goal.x + 1 + Math.round((Math.random() - 0.5) * 3))), y = Math.max(0, Math.min(31, goal.y + 1 + Math.round((Math.random() - 0.5) * 3)))
+    // stand somewhere open near the goal: never inside a house, tree or rock
+    const cells = layout(all.filter((t) => t.expiresAt > h))
+    let x = goal.x + 1, y = goal.y + 1
+    for (let tries = 0; tries < 30 && solidAt(cells, x, y); tries++) { x = Math.max(0, Math.min(31, goal.x + Math.round((Math.random() - 0.5) * 5))); y = Math.max(0, Math.min(31, goal.y + Math.round((Math.random() - 0.5) * 5))) }
     const mine = presences.find((p) => p.owner.toLowerCase() === b.account.address.toLowerCase())
+    if (mine && mine.look !== home.look) await safely(`${home.data.islander} changes`, () => b.wallet.patchEntity({ entityKey: mine.key, set: { look: str(home.look || "carpenter") } }))
     await safely(`${home.data.islander} strolls to ${x},${y}`, () => mine
       ? movePresence(b.wallet, { key: mine.key, x, y, seconds: 1500 })
       : createPresence(b.wallet, { home, x, y, seconds: 1500 }))
