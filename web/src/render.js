@@ -6,7 +6,10 @@ const TW = 96, TH = 48 // tile diamond at zoom 1
 const POSES = ["", "-hungry", "-sleepy", "-sleeping", "-eating", "-waving"]
 const DECOR = ["deco-palm", "deco-pines", "deco-rocks", "deco-flowers", "deco-grass", "deco-bench", "boat-row", "boat-sail"]
 const SPRITES = ["driftwood", "pine", "stone", "monument", "lighthouse", "plot", "inscription", "buoy", "jetty", "seawall", "stew", ...DECOR,
-  ...["carpenter", "mason", "lamplighter", "fisher", "weaver", "baker", "sailor", "kid", "elder"].flatMap((l) => [...POSES, "-sad"].map((p) => l + p).concat([0, 1, 2, 3].map((i) => `${l}-walk-${i}`))),
+  // the first three islanders have every pose; the six newer ones have no separate hungry/sleepy pose
+  ...["carpenter", "mason", "lamplighter"].flatMap((l) => [...POSES, "-sad"].map((p) => l + p)),
+  ...["fisher", "weaver", "baker", "sailor", "kid", "elder"].flatMap((l) => ["", "-sad", "-sleeping", "-eating", "-waving"].map((p) => l + p)),
+  ...["carpenter", "mason", "lamplighter", "fisher", "weaver", "baker", "sailor", "kid", "elder"].flatMap((l) => [0, 1, 2, 3].map((i) => `${l}-walk-${i}`)),
   "carpenter", "carpenter-sad", "mason", "mason-sad", "lamplighter", "lamplighter-sad"]
 const img = {}
 export const spriteUrl = (n) => `/sprites/${n}.webp`

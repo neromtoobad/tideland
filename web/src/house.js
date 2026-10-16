@@ -17,7 +17,14 @@ const MOOD_SELF = {
   happy: "is doing well.", hungry: "is hungry.", sleepy: "is exhausted.", sad: "is lonely.", sleeping: "is asleep.", eating: "is eating.", waving: "is waving at a visitor!",
 }
 const MOOD_BUBBLE = { hungry: "🍲", sleepy: "💤", sad: "💧", sleeping: "💤", eating: "😋", waving: "👋", happy: "☀️" }
-export const poseSprite = (look, mood) => `${look || "carpenter"}${{ happy: "", hungry: "-hungry", sleepy: "-sleepy", sad: "-sad", sleeping: "-sleeping", eating: "-eating", waving: "-waving" }[mood] ?? ""}`
+// The first three islanders have every pose; the six newer ones have sad, sleeping, eating and waving, so
+// "hungry" and "sleepy" use their sad pose rather than asking for an image that doesn't exist.
+const FULL_POSES = new Set(["carpenter", "mason", "lamplighter"])
+export const poseSprite = (look, mood) => {
+  const l = look || "carpenter"
+  const m = !FULL_POSES.has(l) && (mood === "hungry" || mood === "sleepy") ? "sad" : mood
+  return `${l}${{ happy: "", hungry: "-hungry", sleepy: "-sleepy", sad: "-sad", sleeping: "-sleeping", eating: "-eating", waving: "-waving" }[m] ?? ""}`
+}
 
 export function createHouse(deps) {
   const { state, headNow, pub, ensureWallet, toast, explorer, refresh, short, esc, same, view, onOpen } = deps
@@ -66,7 +73,7 @@ export function createHouse(deps) {
     cur = null; show()
     history.replaceState(null, "", location.pathname)
     $("house").innerHTML = `<div class="landing">
-      <div class="trio">${LOOKS.map((l) => `<img src="${spriteUrl(l + "-waving")}" alt="" />`).join("")}</div>
+      <div class="trio">${["weaver", "fisher", "carpenter", "kid", "elder"].map((l) => `<img src="${spriteUrl(l + "-waving")}" alt="" />`).join("")}</div>
       <h2>Keep an islander alive</h2>
       <p class="lead">A little islander moves into a house by the sea. They need things, and you can't give them everything yourself.</p>
       <ul class="howto">
