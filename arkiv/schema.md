@@ -14,9 +14,58 @@ draws the same world. Our web client is one implementation; [`cli/tide.mjs`](../
 |---|---|---|---|
 | `app` | `str` | `"tideland"` | Namespace filter, every query starts with it |
 | `world` | `str` | `"s1"` (season) | A new season is a new world without touching old data |
-| `kind` | `str` | `home` · `meal` · `sleep` · `visit` · `sign` · `presence` · `say` · `tend` · `parcel` · `structure` · `inscription` · `guild` · `run` | Type filter |
+| `kind` | `str` | `table` · `seat` · `puffer` · `pass` · `pop` · `win` · `home` · `meal` · `sleep` · `visit` · `sign` · `presence` · `say` · `tend` · `parcel` · `structure` · `inscription` · `guild` · `run` | Type filter |
 
 Coordinates are **numbers** so regions are range queries: `x` and `y` are `i32` in `0..31`.
+
+## Puffer Pass: hot potato with your house as the stake
+
+The main game. A table seats 2 to 6 islanders, each staking **2 hours of their house**. A pufferfish is served to one of
+them. **The puffer is an entity whose expiry is the fuse**, and its holder is its `$owner`. Passing it is a
+`changeOwnership`. When the expiry passes, the puffer drops out of every query: it popped, and whoever owned it is out.
+No server and no referee contract decide; the network's expiry does.
+
+| Entity | Attributes | Payload | Lifetime | Flags | Written by |
+|---|---|---|---|---|---|
+| `table` | `ante i32` (minutes staked per seat, 120), `seats i32` (max 6) | `{ name }` | 30 min | none | the host, in one batch with their own `seat` |
+| `seat` | `table key`, `home key`, `look str` | `{ name }` | 1 day | `readonly` | each player; `$creator` is the player |
+| `puffer` | `table key`, `round i32`, `fuse u64` (the pop block) | `{}` | **until `fuse`** (`ExpirationTime.atBlock`) | `readonly` | the server, in one batch with the first `pass` and the hand-over |
+| `pass` | `table key`, `puffer key`, `round i32`, `to addr`, and on the serve only `fuse u64` | `{}` | 1 day | `readonly` | the holder, in one batch with `changeOwnership(puffer → to)` |
+| `pop` | `table key`, `round i32`, `puffer key`, `home key` (the loser's house), `loser addr` | `{}` | **6 h: the flood** | `readonly` | the loser first; any seated witness after 7 s; the crew for bots |
+| `win` | `table key`, `home key` (the winner's house), `minutes i32` (paid), `pot i32` | `{}` | 30 days | `readonly` | whoever writes the final pop, in the same batch as the payout |
+
+**Serve** (one batch): create the puffer (key predicted with `predictEntityKeys`) with an exact expiry block, create the
+first `pass` record carrying the same `fuse`, and `changeOwnership` the puffer to its first holder. Fuses are 20 to 36 s.
+
+**Pass** (one batch): create a `pass` record and `changeOwnership` the puffer to the target. Both land or neither. A
+pass that arrives after the fuse fails (the entity is gone), so a slow throw pops in your own hands.
+
+**The rules every client applies** ([`resolveTable()`](../shared/tideland.js), a pure function of the table's records):
+
+1. Seats: one per player, the first 6 by `$createdAt`, taken before the first serve. Pot = seats × `ante`.
+2. Round *r*'s puffer is the earliest serve for round *r* by a seated player to a live seat.
+3. The holder at the pop is found by following that puffer's `pass` records in order: a pass only counts if its
+   `$creator` was the holder at the time and its `to` is a seat. Passes at or after `fuse` don't exist (the engine
+   refuses them). Clients also refuse to pass straight back to whoever threw it to you, unless two are left.
+4. The `fuse` attribute is the referee, not the live expiry. A `readonly` entity can still be **extended by its owner**,
+   so a holder could try to push the fuse out; any extension of a puffer is ignored, and the pop is judged at `fuse`.
+5. The loser serves the next puffer (and picks who gets it). If they don't within ~12 s, any seated player may.
+6. When one seat is left, the final pop's batch also **extends the winner's house** by the pot (to an absolute block,
+   capped at the house's level limit; homes are `permissionlessExtension`, so anyone can pay it) and writes the `win`.
+   A duplicate payout would not move the expiry later, so the engine reverts it.
+
+**The stake is real, in both directions.** Arkiv can never shorten an entity, so a pop can't take hours off a house.
+Instead the `pop` entity points at the loser's house and lives 6 hours: **while it is alive the house is flooded**,
+and no Tideland client (web, CLI or the guild bots) will shore that house up. Its lifetime is the flood. The winner's
+gain is a real `extendEntity` on their house, signed in the same transaction as the `win` record.
+
+**Reading a table:** `app = 'tideland' AND world = 's1' AND table = <key>` returns seats, passes, pops, wins and the live
+puffer in one query. Live play rides on `watchEntityEvents`: an `OwnershipTransferred` on the current puffer is a pass
+and is applied without a re-read; any other create triggers one debounced query.
+
+**The crew.** The nine guild bots can take seats ([`/api/crew`](../api/crew.js)). Each signs with its own key and stakes
+its own house. The browser at the table decides when a bot moves; the endpoint only signs, and a bot can only pass a
+puffer it owns.
 
 ## Entity types
 

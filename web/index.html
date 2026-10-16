@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Tideland</title>
-  <meta name="description" content="A shared world the tide is always taking back. Every house is an Arkiv entity; whatever nobody tends sinks." />
+  <meta name="description" content="Hot potato with a pufferfish, and your house is the stake. The puffer is an Arkiv entity: its expiry is the fuse, its owner is whoever holds it." />
   <link rel="icon" href="/sprites/lighthouse.webp" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -16,6 +16,7 @@
   <nav class="topbar">
     <button class="logo" data-nav="home">Tide<em>land</em></button>
     <div class="row">
+      <button class="primary" data-pp="play">🐡 Puffer Pass</button>
       <button class="ghost" data-nav="board">🏆 Island board</button>
       <button class="ghost" data-nav="sound" id="nav-sound" aria-label="Sound">🔊</button>
       <button class="ghost" data-nav="explore" id="nav-explore">Explore the coast</button>
@@ -24,6 +25,7 @@
         <div class="menu-list" id="menu-list" hidden>
           <button data-nav="how">How it works</button>
           <button data-nav="mirror">Read it without this site</button>
+          <button data-pp="play">Puffer Pass</button>
           <button data-run="lobby">Storm shift (mini-game)</button>
           <button data-nav="wallet">Your key &amp; test GLM</button>
         </div>
@@ -34,13 +36,14 @@
   <header class="brand card">
     <div class="eyebrow">Arkiv · Tiramisu · world s1</div>
     <h1>Tide<em>land</em></h1>
-    <p class="tagline">Islanders who need food, sleep and friends, in houses the tide is taking back. You can't give them everything yourself.</p>
+    <p class="tagline">Hot potato with a pufferfish, and your house is the stake. Pass it before it pops: the puffer's expiry on Arkiv is the fuse.</p>
     <div class="stats">
       <span><b id="stat-live">–</b> standing</span>
       <span><b id="stat-tide" class="sink">–</b> sink within 24 h</span>
       <span class="mono">block <b id="stat-block">–</b></span>
       <span class="sink small" id="stat-relay" hidden title="Your network's anonymous Arkiv read budget is used up, so reads go through our read-only relay.">via relay</span>
     </div>
+    <button class="storm-cta puff" data-pp="play">🐡 Play Puffer Pass <span>stake 2 h of your house · last one standing takes the pot</span></button>
     <button class="storm-cta" id="cta-home" data-house="build">Move in <span>your islander · 12 h to start · friends keep them going</span></button>
     <div class="row cta2">
       <button class="primary" id="cta-save">Visit someone in need</button>
@@ -105,6 +108,18 @@
   </div>
 
   <section class="run-result card" id="run-result" hidden><div id="run-result-body"></div></section>
+
+  <section class="pp" id="pp" hidden>
+    <canvas id="pp-canvas" aria-label="Puffer Pass table"></canvas>
+    <div class="pp-top">
+      <button class="ghost" data-pp="leave">← Island</button>
+      <div class="pp-title">Puffer <em>Pass</em></div>
+      <div class="pp-top-info mono" id="pp-top-info"></div>
+    </div>
+    <div class="pp-status" id="pp-status"></div>
+    <aside class="pp-panel card" id="pp-panel"></aside>
+    <ol class="pp-log mono" id="pp-log"></ol>
+  </section>
 
   <div class="toast" id="toast" hidden></div>
 

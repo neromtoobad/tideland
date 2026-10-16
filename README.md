@@ -1,21 +1,16 @@
 # Tideland
 
-**Islanders who need food, sleep and friends, in houses the tide is taking back.** Every need is an Arkiv entity with
-a lifetime: a meal feeds for 8 hours, sleep rests for 12, a friend's visit warms for 24, and the house can hold 3 days
-at most. You can fish and sleep for your islander; only *other people* can visit, cook for them, or keep the house
-afloat. A friend's visit is one atomic transaction that creates the visit, cooks a meal and hands it over (the cook stays
-`$creator`, your islander's owner becomes `$owner`), and shores up the house.
+**Hot potato with a pufferfish, and your house is the stake.** Sit at a table on the beach, stake two hours of your
+house, and pass the puffer before it pops. The puffer is an [Arkiv](https://arkiv.network) entity: **its expiry is the
+fuse** and **its holder is its `$owner`**. Every throw is a `changeOwnership` sealed with a signed pass record from
+your own key. When the expiry passes, the puffer is simply gone from every query: it popped, and whoever owned it is out.
+No server decides. Pop and your house **floods for 6 hours** (nobody can shore it up). The last islander standing takes
+the whole pot onto their house, paid in the same transaction as their win record.
 
-**Your house sinks unless someone keeps it afloat.** Build a house on the coast; it starts with 12 hours and can never
-hold more than 3 days, and only *other people* can keep it alive. Share the link; a friend opens it, holds a button,
-and watches the water drain. Releasing seals one atomic Arkiv transaction that extends your house **and** writes their
-signed line in its guestbook. Your house lives exactly as long as somebody cares.
+Around the game is the rest of Tideland: islanders who need food, sleep and friends, in houses the tide is taking back.
+Your house only lives as long as other people keep it afloat, which is exactly why it is worth staking.
 
-**A shared world the tide is always taking back.** Every house, parcel, inscription and guild charter on this coast is an
-[Arkiv](https://arkiv.network) entity with an expiry. Nothing deletes them. When nobody tends something, its expiry passes and it
-drops out of every query: it sinks. Decay is not game code a studio can patch. It is the database.
-
-- **Play:** https://tideland.nerom.site: **Build your house**, or **Save a sinking house**. Share links look like `https://tideland.nerom.site/h/<house key>` and unfurl on X as a playable card.
+- **Play:** https://tideland.nerom.site: **Play Puffer Pass** (the island crew sits with you, or share the table link with friends). Move in first if you have no house; it takes one transaction. Share links look like `https://tideland.nerom.site/h/<house key>` and unfurl on X as a playable card.
 - **Keeper Run:** 90 seconds in a storm. Buoys, jetties, sea walls and lighthouses are *commons*: created with
   `permissionlessExtension`, owned by nobody's upkeep. Run between them and hold to patch before they sink. Every patch
   is a real Lifetime Extension, sealed every few seconds in one atomic batch from your own key. Your run becomes a
@@ -40,12 +35,21 @@ directly, and [`cli/tide.mjs`](cli/tide.mjs) is a second client that draws the s
 
 **Deliberately kept off Arkiv:** sprites and animation (they ship with each client), realtime movement, and any personal data.
 The only server code is [`api/drip.js`](api/drip.js), which sends new players a little *test* GLM so they can sign their own
-writes, and [`api/rpc.js`](api/rpc.js), a read-only relay the client uses only if a visitor's anonymous RPC budget runs out.
+writes, [`api/rpc.js`](api/rpc.js), a read-only relay the client uses only if a visitor's anonymous RPC budget runs out,
+and [`api/crew.js`](api/crew.js), which signs for the nine guild bots when they sit at a Puffer Pass table (each bot has
+its own key and stakes its own house; the endpoint can't move a puffer a bot doesn't own). The game's rules don't live
+there: every client recomputes them from the table's public records.
 
 ## How each Arkiv feature is used
 
 | Feature | What the player sees | Code |
 |---|---|---|
+| **Expiry as a game clock** | The puffer's fuse is its expiry, pinned with `ExpirationTime.atBlock`. It swells as the block approaches; when the block passes, it pops. | [`servePuffer()`](shared/tideland.js), [`puffer.js`](web/src/puffer.js) |
+| **`changeOwnership` as a move** | Holding the puffer = owning the entity. A throw is one batch: a signed `pass` record + the ownership change. A throw that lands after the fuse fails. | [`passPuffer()`](shared/tideland.js) |
+| **Rules as a pure function of public records** | Seats, the holder chain, who popped and who won are recomputed by every client from one query, so a cheat (passing to a non-player, extending the fuse) is ignored by everyone. | [`resolveTable()`](shared/tideland.js) |
+| **A lifetime that is a penalty** | A `pop` entity points at the loser's house and lives 6 h: while it's alive the house is flooded and no client (web, CLI, bots) shores it up. | [`popPuffer()`](shared/tideland.js), [`floodOf()`](shared/tideland.js) |
+| **Batch: pop + payout + win, atomic** | The final pop extends the winner's house by the pot (permissionless) and writes their 30-day `win`, together. | [`popPuffer()`](shared/tideland.js) |
+| **Live play over the socket** | `OwnershipTransferred` events move the puffer on screen without a re-read; other creates trigger one debounced table query. | [`onEvent()`](web/src/puffer.js) |
 | **Verifiable progression** | Visits leave 30-day signatures; distinct signers level a house up (shack → cottage → stone → lighthouse, holding 2 → 7 days). Upgrading is a `patchEntity`; every client checks the claimed level against the signatures' `$creator`s and flags an overclaim. | [`levelBlock()`](web/src/house.js), [`LEVELS`](shared/tideland.js) |
 | **Presence as a lease** | Your islander's position is a 10-minute entity, patched and extended in one batch when you stop walking; close the tab and you fade from the square. | [`movePresence()`](shared/tideland.js), [`walk.js`](web/src/walk.js) |
 | **60-second speech** | Chat bubbles are entities that live one minute: the conversation literally evaporates. | [`say()`](shared/tideland.js) |

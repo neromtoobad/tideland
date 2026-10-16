@@ -378,3 +378,54 @@ body.play .me-hud { flex-direction: column; align-items: stretch; width: 300px; 
 .celebrate i { position: absolute; top: -20px; width: 9px; height: 14px; border-radius: 2px; animation: fall linear forwards; }
 @keyframes fall { to { transform: translateY(110vh) rotate(720deg); } }
 @keyframes pop { from { transform: scale(.6); opacity: 0 } to { transform: scale(1); opacity: 1 } }
+
+/* ---------- Puffer Pass ---------- */
+body.puffing > :not(.pp):not(.toast):not(dialog):not(.celebrate) { visibility: hidden; }
+.pp { position: fixed; inset: 0; z-index: 40; background: #ead3a6; }
+#pp-canvas { position: absolute; inset: 0; display: block; touch-action: manipulation; }
+.pp-top { position: absolute; top: 12px; left: 16px; right: 16px; display: flex; align-items: center; gap: 12px; }
+.pp-top .ghost { background: rgba(251,252,250,.9); white-space: nowrap; }
+.pp-title { font: 400 30px/1 "Instrument Serif", serif; color: #fff; text-shadow: 0 1px 8px rgba(0,0,0,.18); }
+.pp-title em { color: #ffe08a; }
+.pp-top-info { white-space: nowrap; margin-left: auto; background: rgba(251,252,250,.9); border-radius: 999px; padding: 6px 12px; font-size: 12px; }
+.pp-status { position: absolute; left: 50%; top: 64px; transform: translateX(-50%); text-align: center; pointer-events: none; display: grid; gap: 2px; width: min(92vw, 560px); }
+.pp-status b { font: 700 28px/1.1 "Albert Sans", sans-serif; color: #fff; text-shadow: 0 2px 10px rgba(16,60,62,.35); }
+.pp-status b.hot { color: #ffe08a; animation: ppthrob .7s ease-in-out infinite; }
+.pp-status b.go { color: #e3fff9; }
+.pp-status span { font: 500 12.5px/1.3 "IBM Plex Mono", monospace; color: rgba(255,255,255,.85); }
+@keyframes ppthrob { 50% { transform: scale(1.06); } }
+.pp-panel { left: 16px; bottom: 16px; width: min(400px, calc(100vw - 32px)); max-height: 62vh; overflow: auto; }
+.pp-panel.intro { left: 50%; top: 50%; bottom: auto; transform: translate(-50%, -38%); width: min(460px, calc(100vw - 32px)); }
+.pp-panel.live, .pp-panel.between:not(:has(.pp-picks)) { width: min(330px, calc(100vw - 32px)); }
+.pp-panel h2 { font: 400 28px/1.1 "Instrument Serif", serif; margin: 6px 0 8px; }
+.pp-panel h3 { margin: 10px 0 8px; font-size: 15px; }
+.pp-panel .howto { list-style: none; padding: 0; margin: 10px 0 14px; display: grid; gap: 8px; }
+.pp-panel .howto li { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; }
+.pp-panel .howto span { font-size: 20px; line-height: 1.1; }
+.pp-you { display: flex; gap: 10px; align-items: center; background: var(--tide-soft); border-radius: 12px; padding: 8px 10px; margin-bottom: 10px; }
+.pp-you img { height: 48px; }
+.pp-you div { display: grid; font-size: 13px; }
+.pp-you span { color: var(--muted); font-size: 12px; }
+.pp-tables { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.pp-tables li { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.pp-tables li span { color: var(--muted); font-size: 12px; margin-right: auto; }
+.pp-picks { display: flex; gap: 8px; flex-wrap: wrap; }
+.pp-picks .keeper { width: 84px; }
+.pp-picks .keeper img { height: 64px; }
+.pp-log { position: absolute; right: 16px; bottom: 16px; width: min(330px, 40vw); list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 11.5px; }
+.pp-log li { background: rgba(251,252,250,.88); border-radius: 8px; padding: 5px 9px; color: var(--ink); }
+.pp-log li.mine { background: var(--tide-soft); }
+.pp-log li:nth-child(n+5) { opacity: .6; }
+.pp-log a { color: var(--tide); }
+.storm-cta.puff { background: linear-gradient(135deg, #f2a33a, #d9622b); color: #fff; border-color: transparent; }
+.storm-cta.puff span { color: rgba(255,255,255,.88); }
+@media (max-width: 720px) {
+  .pp-log { left: 16px; right: 16px; width: auto; bottom: auto; top: 122px; }
+  .pp-log li:nth-child(n+3) { display: none; }
+  .pp-status { top: 62px; }
+  .pp-title { display: none; }
+  .pp-status b { font-size: 21px; }
+  .pp-panel:not(.intro) { max-height: 40vh; }
+}
+.storm-cta.puff.small-cta { margin: 8px 0 4px; padding: 10px 14px; font-size: 14px; width: 100%; }
+.pp-top-info:empty { display: none; }

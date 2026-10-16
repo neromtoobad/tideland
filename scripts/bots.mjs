@@ -17,7 +17,7 @@ import {
   SIZE, MATERIALS, DAY_BLOCKS, publicClient, walletClient, collect, worldQuery, guildsQuery, layout, lifeLeft,
   claimAndBuild, renew, tend, inscribe, foundGuild, sell, build, placeCommons, COMMONS,
   buildHome, keepAfloat, homesQuery, HOME_STYLES, fish, sleep as goToBed, visit, lifeQuery, needsOf, DISHES,
-  createPresence, movePresence, LEVELS, signersOf, earnedLevel, upgradeHome, LOOKS, solidAt,
+  createPresence, movePresence, LEVELS, signersOf, earnedLevel, upgradeHome, LOOKS, solidAt, floodOf,
 } from "../shared/tideland.js"
 import { ExpirationTime, jsonToPayload } from "@arkiv-network/sdk"
 import { str } from "@arkiv-network/sdk/attr"
@@ -154,7 +154,9 @@ async function wander() {
 async function call(b, home, lives, h) {
   const n = lives.get(home.key)
   const dish = n && n.food < 0.5 ? pick(DISHES) : null
-  const addBlocks = home.expiresAt - h < 43200n ? BigInt(Math.round((2 + Math.random() * 4) * 1800)) : 0n
+  // the island's rule: nobody shores up a house a puffer flooded until the water drains
+  const flooded = n && floodOf(n.alive, h)
+  const addBlocks = !flooded && home.expiresAt - h < 43200n ? BigInt(Math.round((2 + Math.random() * 4) * 1800)) : 0n
   await safely(`${GUILDS[b.guild].name} visits ${home.data.islander ?? home.data.name}${dish ? ` with ${dish}` : ""}${addBlocks ? " and shores up the house" : ""}`,
     () => visit(b.wallet, pub, { home, note: pick(NOTES), dish, addBlocks }))
 }

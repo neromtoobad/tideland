@@ -119,6 +119,35 @@ personal wallet and send the GLM on to the treasury in a second transaction (10 
 - Expiry produces no event (by design). A client that wants a "just sank" moment has to compare each entity's
   `$expiresAt` with the head block itself. We do this every 10 s locally; a note in the events docs would save the search.
 
+
+## 7. `readonly` doesn't freeze the expiry (Puffer Pass, 16 Oct)
+
+**Surface:** creation flags.
+
+**Expected:** a `readonly` entity is fully immutable, so a game timer stored as its expiry can't be tampered with.
+
+**Actual:** the type docs are precise about it: readonly means attributes and payload can't change, but the owner can
+still extend the expiry, transfer it and delete it. In Puffer Pass the holder of the puffer is its owner, so the holder
+could push the fuse out. **Workaround:** the puffer also carries its pop block as a `fuse` attribute (which readonly does
+freeze), and the rules judge the pop at `fuse`, ignoring any extension. A flag such as `fixedExpiry` would make the
+entity's expiry itself a trustworthy timer.
+
+## 8. Expiry has no event, so "it popped" is computed by every client
+
+**Surface:** `watchEntityEvents`.
+
+**Actual:** the decisive moment of the game (the puffer expiring) emits nothing. Each client estimates the head block
+from the last event's `blockNumber` plus wall-clock time, notices `head ≥ fuse`, then re-reads the table to confirm from
+the records. It works, but an `EntityExpired` event (or a cheap "expiries in block N" query) would remove the guesswork
+and the extra reads.
+
+## 9. Write latency is the game's tension, and it's ~1 block
+
+**Measured (16 Oct, two full 4-player games in the browser):** a pass (`executeBatch` with one create and one
+`changeOwnership`) showed up as an `OwnershipTransferred` event on the socket in about one to two blocks; the receipt
+promise resolved a few seconds later. We drive the UI from the event, not the receipt. A pass that reaches the node after
+the fuse block fails as expected ("entity not found"), and the player sees "too late: it popped in your hands".
+
 ---
 
 ## Tested paths that worked as documented
@@ -131,6 +160,9 @@ personal wallet and send the GLM on to the treasury in a second transaction (10 
 | `executeBatch` with two `extensions` (house + land) | Both expiries moved in one tx (914,872 → 914,895 and 1,217,272 → 1,217,295). |
 | `executeBatch` with two `ownershipChanges` | `$owner` changed on both; `$creator` unchanged, so "built by" survives the sale. |
 | `readonly` flag on monuments and inscriptions | Created fine; the UI offers no edit. |
+| `changeOwnership` of a `readonly` puffer, repeatedly, each in a batch with a `readonly` create | Worked on every pass across two 4-player games; `$creator` of the puffer stays the server. |
+| `ExpirationTime.atBlock(fuse)` on create | The entity left queries at exactly that block; passes after it reverted. |
+| Paying a winner with `extensions: [home → atBlock(target)]` signed by the loser | Their house went from 13 h 52 m to 21 h 51 m (+8 h pot) in the same tx as the `win` record. |
 | Range query on the system attribute `$expiresAt` (the tide map) | Returns exactly the entities sinking before the given block. |
 | Range queries on `i32` attributes `x`, `y` (region / single cell) | Work as documented. |
 | `watchEntityEvents` over `webSocket()` with no `fromBlock` | Events arrived in the browser and drove the UI without polling. |

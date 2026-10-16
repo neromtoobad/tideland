@@ -8,6 +8,7 @@ import { localWallet, injectedWallet, balanceOf, drip } from "./wallet.js"
 import { createRun } from "./run.js"
 import { createHouse } from "./house.js"
 import { createWalk } from "./walk.js"
+import { createPuffer } from "./puffer.js"
 import { ambient, setMuted } from "./sfx.js"
 
 const EXPLORER = "https://tiramisu.explorer.arkiv.network"
@@ -102,12 +103,14 @@ function watchLive() {
   // debounced re-read of the world (2 queries) instead of one getEntity per event.
   let pending = null
   const touch = () => {
-    if (runner.active) return // during a run, events update expiries in place: no re-reads
+    // during a run, events update expiries in place; at a Puffer Pass table, the table reads its own records
+    if (runner.active || puffer.active) return
     clearTimeout(pending)
     // walking about, the busy part of the world is short-lived (presence, speech): re-read just that layer
     pending = setTimeout(() => (walk?.active ? refreshLive() : refresh()).catch(() => {}), walk?.active ? 900 : 2500)
   }
   ws.watchEntityEvents({
+    onEvent: (e) => puffer.onEvent(e),
     onEntityCreated: (e) => { touch(e); house.onCreated() },
     onExpiryExtended: async (e) => {
       runner.onExtended(e.entityKey, e.expiresAt) // the event carries the new expiry: apply it directly
@@ -440,8 +443,17 @@ async function ensureRunWallet({ quiet = false } = {}) {
 const house = createHouse({
   state, view, headNow, pub: () => pub, ensureWallet: ensureRunWallet, toast, explorer: EXPLORER, refresh, short, esc, same,
   onOpen: ({ panel } = {}) => { view.selected = null; renderInspector(); setMode(walk?.active && (panel || walk.active) ? "play" : "focus") },
-  onMovedIn: (key) => { enterPlay(key); house.open(key, { panel: true }); toast("This is your islander. Tap anywhere on the island to walk.", 6000) },
+  onMovedIn: (key) => {
+    let next = null; try { next = localStorage.getItem("tideland.next"); localStorage.removeItem("tideland.next") } catch {}
+    if (next) { house.close(); return puffer.open(next.startsWith("t:") ? next.slice(2) : null) }
+    enterPlay(key); house.open(key, { panel: true }); toast("This is your islander. Tap anywhere on the island to walk.", 6000)
+  },
 })
+const puffer = createPuffer({
+  state, headNow, pub: () => pub, reading, ensureWallet: ensureRunWallet, toast, esc, short, same, explorer: EXPLORER, house,
+  onClose: () => { const mine = house.myHome(); if (mine && enterPlay(mine)) house.close(); else { setMode("focus"); house.home() } },
+})
+document.addEventListener("click", (e) => { if (e.target.closest('[data-pp="play"]') && !puffer.active) { $("menu-list").hidden = true; puffer.open(null) } })
 let walk = null
 
 /** Play mode: you have an islander, so you walk around the island as them. */
@@ -591,5 +603,7 @@ function frame(now) {
   if (q.has("explore")) setMode("explore")
   if (house.myHome() && !hk) $("cta-home").outerHTML = `<button class="storm-cta" id="cta-home" data-myhome="1">Your islander <span>see how they're doing, and who came by</span></button>`
   if (q.has("run")) runner.openLobby()
+  if (q.get("t")) puffer.open(q.get("t"))
+  else if (q.has("play")) puffer.open(null)
   if (q.has("x") && q.has("y")) { const x = +q.get("x"), y = +q.get("y"); select({ x, y }); view.focus(x, y) }
 })()

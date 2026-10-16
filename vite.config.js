@@ -6,12 +6,13 @@ import { homedir } from "node:os"
 function devApi() {
   const keyFile = (n) => `${homedir()}/.tideland/${n}`
   if (!process.env.TREASURY_KEY && existsSync(keyFile("treasury.key"))) process.env.TREASURY_KEY = readFileSync(keyFile("treasury.key"), "utf8").trim()
+  if (!process.env.BOT_SEED && existsSync(keyFile("bots.seed"))) process.env.BOT_SEED = readFileSync(keyFile("bots.seed"), "utf8").trim()
   if (!process.env.ARKIV_ACCESS_KEY && existsSync(keyFile("access.key"))) process.env.ARKIV_ACCESS_KEY = readFileSync(keyFile("access.key"), "utf8").trim()
   return {
     name: "dev-api",
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
-        const m = req.url.match(/^\/api\/(drip|rpc)\b/)
+        const m = req.url.match(/^\/api\/(drip|rpc|crew)\b/)
         if (!m) return next()
         let raw = ""; for await (const c of req) raw += c
         req.body = raw ? JSON.parse(raw) : {}

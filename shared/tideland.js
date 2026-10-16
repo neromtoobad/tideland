@@ -1,7 +1,7 @@
 // The Tideland data contract in code. Shared by the web client, the CLI and the bots, so every
 // reader draws the same world from the same rules. See /arkiv/schema.md for the prose version.
 import { createPublicClient, createWalletClient, ExpirationTime, jsonToPayload } from "@arkiv-network/sdk"
-import { i32, key as keyAttr, str, u64 } from "@arkiv-network/sdk/attr"
+import { addr, i32, key as keyAttr, str, u64 } from "@arkiv-network/sdk/attr"
 import { tiramisu } from "@arkiv-network/sdk/chains"
 import { and, eq, gte, lt, lte, or } from "@arkiv-network/sdk/query"
 import { http, webSocket } from "viem"
@@ -217,6 +217,7 @@ export function needsOf(home, life, head) {
   else if (age("meal") < 450) mood = "eating" // the first 15 minutes of a meal
   else if (age("visit") < 900) mood = "waving" // a friend dropped by in the last 30 minutes
   else if (home.expiresAt - head < 10800n) mood = "sad" // the water is at the door
+  else if (alive.some((t) => t.kind === "pop")) mood = "sad" // flooded by a puffer
   else if (food === 0) mood = "hungry"
   else if (rest === 0) mood = "sleepy"
   else if (friends === 0) mood = "sad"
@@ -541,6 +542,176 @@ export function sell(wallet, { parcel, structure, to }) {
   if (structure && structure.owner?.toLowerCase() === parcel.owner?.toLowerCase()) ownershipChanges.push({ entityKey: structure.key, newOwner: to })
   return wallet.executeBatch({ ownershipChanges })
 }
+
+// ---------- Puffer Pass: hot potato on the beach, with your house as the stake ----------
+// A table seats 2-6 islanders, each staking two hours of their house. A pufferfish is served to one of them
+// with a fuse: the puffer is an entity whose expiry IS the fuse. Its holder is its $owner; passing it is a
+// changeOwnership, sealed in the same batch as a signed pass record. When the expiry passes the puffer is
+// simply gone from every query: it popped, and whoever owned it last is out. No server decides; the network
+// does. The popped islander's house floods for 6 hours (a `pop` entity pointing at the home, whose lifetime
+// IS the flood), during which no Tideland client will shore it up. The loser serves the next puffer.
+// The last islander standing takes the pot: every seat's stake, added to their house in one atomic batch
+// with a 30-day `win` record.
+export const PUFFER = {
+  anteMinutes: 120,
+  floodSeconds: 6 * 3600,
+  tableSeconds: 1800,
+  recordSeconds: 86400,
+  winSeconds: 30 * 86400,
+  fuseSeconds: [20, 36],
+  maxSeats: 6,
+}
+const record = (kind, attributes, payload, seconds, salt) => ({
+  attributes: { ...common(kind), ...attributes },
+  payload: jsonToPayload(payload ?? {}),
+  contentType: "application/json",
+  expires: ExpirationTime.fromSeconds(seconds),
+  flags: { readonly: true },
+  ...(salt ? { salt } : {}),
+})
+const seatCreate = (tableKey, home, salt) => record("seat",
+  { table: keyAttr(tableKey), home: keyAttr(home.key), look: str(home.look || "carpenter") },
+  { name: String(home.data?.islander || home.data?.name || "").slice(0, 24) }, PUFFER.recordSeconds, salt)
+
+/** Open a table and take the first seat, in one batch (the seat points at the table's predicted key). */
+export async function openTable(wallet, reader, { home, name }) {
+  const [t, s] = await reader.predictEntityKeys({ owner: wallet.account.address, count: 2 })
+  const r = await wallet.executeBatch({
+    creates: [
+      { attributes: { ...common("table"), ante: i32(PUFFER.anteMinutes), seats: i32(PUFFER.maxSeats) },
+        payload: jsonToPayload({ name: String(name || "").slice(0, 40) }), contentType: "application/json",
+        expires: ExpirationTime.fromSeconds(PUFFER.tableSeconds), salt: t.salt },
+      seatCreate(t.key, home, s.salt),
+    ],
+  })
+  return { ...r, tableKey: t.key }
+}
+export function takeSeat(wallet, { table, home }) {
+  return wallet.createEntity(seatCreate(table, home))
+}
+
+/**
+ * Serve a puffer: ONE batch that creates the puffer (its expiry is the fuse, pinned to an exact block and
+ * copied into a `fuse` attribute nobody can patch, because it is readonly), writes the first pass record,
+ * and hands the puffer to its first holder.
+ */
+export async function servePuffer(wallet, reader, { table, round, to, fuseSeconds }) {
+  const head = (await reader.getBlockTiming()).currentBlock
+  // a couple of blocks of grace, so the fuse starts about when the serve lands rather than when it was signed
+  const fuse = head + 2n + BigInt(Math.round(fuseSeconds / BLOCK_SECONDS))
+  const [p, r] = await reader.predictEntityKeys({ owner: wallet.account.address, count: 2 })
+  const res = await wallet.executeBatch({
+    creates: [
+      { attributes: { ...common("puffer"), table: keyAttr(table), round: i32(round), fuse: u64(fuse) },
+        payload: jsonToPayload({}), contentType: "application/json", expires: ExpirationTime.atBlock(fuse),
+        flags: { readonly: true }, salt: p.salt },
+      record("pass", { table: keyAttr(table), puffer: keyAttr(p.key), round: i32(round), to: addr(to), fuse: u64(fuse) }, {}, PUFFER.recordSeconds, r.salt),
+    ],
+    ownershipChanges: [{ entityKey: p.key, newOwner: to }],
+  })
+  return { ...res, puffer: p.key, fuse }
+}
+
+/** Pass the puffer on: the signed pass record and the ownership change land together or not at all. */
+export function passPuffer(wallet, { table, puffer, round, to }) {
+  return wallet.executeBatch({
+    creates: [record("pass", { table: keyAttr(table), puffer: keyAttr(puffer), round: i32(round), to: addr(to) }, {}, PUFFER.recordSeconds)],
+    ownershipChanges: [{ entityKey: puffer, newOwner: to }],
+  })
+}
+
+/**
+ * Record a pop. Anyone at the table may write it (the loser's own client first, the others as witnesses);
+ * it is only valid if it names the holder the pass records prove. Its lifetime is the flood.
+ * When the pop leaves one islander standing, the same batch pays them the pot (an extension of their
+ * house, which anyone may make: homes are permissionlessExtension) and writes their 30-day win.
+ */
+export async function popPuffer(wallet, reader, { table, round, puffer, loser, loserHome, winnerHome, potMinutes }) {
+  const creates = [record("pop", { table: keyAttr(table), round: i32(round), puffer: keyAttr(puffer), home: keyAttr(loserHome), loser: addr(loser) }, {}, PUFFER.floodSeconds)]
+  const extensions = []
+  let target = null, minutes = 0
+  if (winnerHome) {
+    const head = (await reader.getBlockTiming()).currentBlock
+    const cap = homeMaxExpiry(head, winnerHome), from = winnerHome.expiresAt > head ? winnerHome.expiresAt : head
+    target = from + lifetimeBlocks(potMinutes * 60) > cap ? cap : from + lifetimeBlocks(potMinutes * 60)
+    minutes = target > winnerHome.expiresAt ? Math.round((Number(target - winnerHome.expiresAt) * BLOCK_SECONDS) / 60) : 0
+    if (minutes > 0) extensions.push({ entityKey: winnerHome.key, expires: ExpirationTime.atBlock(target) })
+    creates.push(record("win", { table: keyAttr(table), home: keyAttr(winnerHome.key), minutes: i32(minutes), pot: i32(potMinutes) }, {}, PUFFER.winSeconds))
+  }
+  const r = await wallet.executeBatch({ creates, extensions })
+  return { ...r, target, minutes }
+}
+
+export const tableQuery = (client, tableKey) => client.select(FIELDS).where(eq("app", APP), eq("world", WORLD), eq("table", keyAttr(tableKey)))
+export const tablesQuery = (client) => client.select(FIELDS).where(base("table"))
+export const winsQuery = (client) => client.select(FIELDS).where(base("win"))
+
+const lc = (a) => String(a ?? "").toLowerCase()
+const older = (a, b) => (a.createdAt === b.createdAt ? (a.key < b.key ? -1 : 1) : a.createdAt < b.createdAt ? -1 : 1)
+
+/**
+ * The rules, as a pure function of the table's records, so every client (and every bot) reads the same game.
+ * `recs` = everything with table === key (seats, puffers, passes, pops, wins). Puffers vanish when they pop,
+ * so the history lives in the pass records: each carries its puffer's key, and the serve carries the fuse.
+ * `live` = extra passes seen as OwnershipTransferred events before the query catches up ({ puffer, creator, to, createdAt }).
+ */
+export function resolveTable(table, recs, head, live = []) {
+  const of = (k) => recs.filter((r) => r.kind === k).sort(older)
+  // seats: one per player, the first `maxSeats`, and only those taken before the first serve
+  const passes = [...of("pass").map((p) => ({ key: p.key, puffer: lc(p.attrs.puffer), round: Number(p.attrs.round), creator: lc(p.creator), to: lc(p.attrs.to), fuse: p.attrs.fuse, createdAt: p.createdAt }))]
+  for (const l of live) if (!passes.some((p) => p.puffer === lc(l.puffer) && p.createdAt === l.createdAt)) passes.push({ ...l, puffer: lc(l.puffer), creator: lc(l.creator), to: lc(l.to) })
+  passes.sort(older)
+  const byPuffer = new Map()
+  for (const p of passes) (byPuffer.get(p.puffer) ?? byPuffer.set(p.puffer, []).get(p.puffer)).push(p)
+  const serves = [...byPuffer.values()].map((ps) => ps[0]).filter((s) => s.fuse !== undefined).sort(older)
+  const firstServe = serves[0]?.createdAt
+  const seats = []
+  for (const s of of("seat")) {
+    if (firstServe !== undefined && s.createdAt > firstServe) continue
+    if (seats.some((x) => x.player === lc(s.creator)) || seats.length >= (Number(table?.attrs?.seats) || PUFFER.maxSeats)) continue
+    seats.push({ key: s.key, player: lc(s.creator), home: s.attrs.home, look: s.attrs.look, name: s.data.name || "Islander", createdAt: s.createdAt })
+  }
+  const seated = new Set(seats.map((s) => s.player))
+  const pot = seats.length * (Number(table?.attrs?.ante) || PUFFER.anteMinutes)
+
+  /** Who held a puffer when it popped: follow the chain of passes, each signed by the previous holder. */
+  const chain = (ps) => {
+    const fuse = BigInt(ps[0].fuse)
+    let holder = ps[0].to, from = ps[0].creator, hops = 0
+    for (const p of ps.slice(1)) {
+      if (p.createdAt >= fuse) break
+      if (p.creator !== holder || !seated.has(p.to)) continue // only the holder can pass, and only to a seat
+      from = holder; holder = p.to; hops++
+    }
+    return { holder, from, fuse, hops }
+  }
+  const out = new Map() // player -> round they popped
+  const pops = []
+  let round = 1, current = null
+  for (;;) {
+    const alive = seats.filter((s) => !out.has(s.player))
+    if (alive.length <= 1 && seats.length > 1 && round > 1) break
+    // the valid puffer for this round: the earliest serve, by a seated player, to a live seat
+    const serve = serves.find((s) => s.round === round && seated.has(s.creator) && alive.some((a) => a.player === s.to))
+    if (!serve) break
+    const c = chain(byPuffer.get(serve.puffer))
+    const popped = head >= c.fuse
+    const rec = of("pop").find((p) => Number(p.attrs.round) === round && lc(p.attrs.puffer) === serve.puffer && lc(p.attrs.loser) === c.holder)
+    current = { round, puffer: serve.puffer, server: serve.creator, servedAt: serve.createdAt, ...c, popped, record: rec ?? null }
+    if (!popped) break
+    out.set(c.holder, round)
+    pops.push(current)
+    round++
+  }
+  const alive = seats.filter((s) => !out.has(s.player))
+  const winner = seats.length > 1 && alive.length === 1 && out.size === seats.length - 1 ? alive[0] : null
+  const win = winner ? of("win").find((w) => w.attrs.home === winner.home) ?? null : null
+  const phase = !serves.length ? "lobby" : winner ? "done" : current && !current.popped ? "live" : "between"
+  return { seats, alive, out, pops, round: current && !current.popped ? current.round : round, current: current && !current.popped ? current : null, last: pops[pops.length - 1] ?? null, winner, win, phase, pot }
+}
+
+/** A house is flooded while a pop pointing at it is still alive. Tideland clients won't shore it up until it drains. */
+export const floodOf = (life, head) => life.filter((t) => t.kind === "pop" && t.expiresAt > head).sort((a, b) => (a.expiresAt < b.expiresAt ? 1 : -1))[0] ?? null
 
 // ---------- The island's layout (decor, sand, what is solid). Pure, so every client and bot agree. ----------
 export const hash = (x, y) => { let n = x * 374761393 + y * 668265263; n = (n ^ (n >>> 13)) * 1274126177; return ((n ^ (n >>> 16)) >>> 0) / 4294967296 }

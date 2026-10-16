@@ -3,7 +3,7 @@
 // only other people can visit, cook for them, or keep the house afloat. Every action is one transaction.
 import {
   HOME_MAX_SECONDS, HOME_STYLES, BLOCK_SECONDS, SIZE, LOOKS, NEEDS, DISHES, homeMaxExpiry, buildHome, fish, sleep, visit,
-  lifeQuery, needsOf, collect, blocksToText, toThing, lifetimeBlocks, LEVELS, levelOf, levelIndex, signersOf, earnedLevel, upgradeHome,
+  lifeQuery, needsOf, collect, blocksToText, toThing, lifetimeBlocks, LEVELS, levelOf, levelIndex, signersOf, earnedLevel, upgradeHome, floodOf,
 } from "../../shared/tideland.js"
 import { spriteUrl } from "./render.js"
 import { sfx } from "./sfx.js"
@@ -127,7 +127,8 @@ export function createHouse(deps) {
     el.innerHTML = `${closeBtn()}
       <div class="eyebrow">${mine ? "Your islander" : "You're visiting"}</div>
       <h2>${nm}</h2>
-      <p class="mood mood-${n.mood}">${nm} ${MOOD_SELF[n.mood]}</p>
+      <p class="mood mood-${n.mood}">${nm} ${floodOf(cur.life, head) && n.mood === "sad" ? "is soaked: a puffer popped on them." : MOOD_SELF[n.mood]}</p>
+      ${floodBanner(h, head)}
       ${levelBlock(h, mine)}
       <div class="diorama ${cur.hold ? "lifting" : ""}" id="h-diorama">
         <img class="home" src="${spriteUrl(h.style || "pine")}" alt="" style="transform: translateY(${(water(left) - 40) * 0.35}px)" />
@@ -146,6 +147,13 @@ export function createHouse(deps) {
       ${diary(h)}
       ${mine ? neighbours("Neighbours who need help") : ""}
       <details class="more"><summary>How this works on Arkiv</summary><p>Each bar is an Arkiv entity pointing at this house, and it expires by itself: a meal after 8 hours, sleep after 12, a visit after 24; the house can hold 3 days at most and anyone can extend it. Whoever cooked a meal or visited is that entity's on-chain author. <a href="${explorer}/entity/${h.key}" target="_blank" rel="noopener">See the house entity</a>.</p></details>`
+  }
+
+  /** A puffer popped on this islander: the house is flooded until the pop entity expires. */
+  function floodBanner(h, head) {
+    const f = floodOf(cur.life, head)
+    if (!f) return `<button class="storm-cta puff small-cta" data-pp="play">🐡 ${isMine() ? "Stake your house at Puffer Pass" : "Play Puffer Pass"}</button>`
+    return `<div class="callout warn"><b>🌊 Flooded by a puffer</b><p>${esc(name(h))} held the puffer when it popped. Nobody can shore this house up for <b>${blocksToText(f.expiresAt - head)}</b>, until the water drains. The flood is an Arkiv entity pointing at this house; its lifetime is the flood.</p></div>`
   }
 
   const closeBtn = () => (document.body.classList.contains("play") ? `<button class="close" data-house="close" aria-label="Back to the island">×</button>` : "")
@@ -205,7 +213,7 @@ export function createHouse(deps) {
     return `<label class="bring"><input type="checkbox" id="h-dish" ${hungry ? "checked" : ""}/> Bring ${esc(cur.dish ||= DISHES[Math.floor(Math.random() * DISHES.length)])}${hungry ? ` <span class="sink small">(${nm} is hungry)</span>` : ""}</label>
       <input id="h-note" maxlength="80" placeholder="Say something to ${nm} (optional)" />
       <button class="holdbtn" id="h-hold"><span class="ring"></span><span class="lbl">Visit ${nm}</span></button>
-      <p class="note small" id="h-status">${cur.saved ? cur.saved : `Tap to visit. <b>Hold</b> to also shore up the house; the longer you hold, the more time it gets.`}</p>
+      <p class="note small" id="h-status">${cur.saved ? cur.saved : floodOf(cur.life, headNow()) ? `You can visit, but the house is flooded: holding won't shore it up until the water drains.` : `Tap to visit. <b>Hold</b> to also shore up the house; the longer you hold, the more time it gets.`}</p>
       ${cur.saved && !myHome() ? `<div class="callout"><b>Want one of your own?</b><p>Move in an islander and send your link to the people who visit you back.</p><button class="primary" data-house="build">Move in</button></div>` : ""}`
   }
 
@@ -219,6 +227,9 @@ export function createHouse(deps) {
       else if (t.kind === "sleep") lines.push({ at: t.createdAt, text: "Slept." })
       else if (t.kind === "sign" && by) lines.push({ at: t.createdAt, text: t.data.note ? `${by} visited and signed the book: “${esc(t.data.note)}”` : `${by} visited and signed the book.` })
       else if (t.kind === "visit" && by && !cur.life.some((x) => x.kind === "sign" && same(x.creator, t.creator) && x.createdAt === t.createdAt)) lines.push({ at: t.createdAt, text: t.data.note ? `${by} visited: “${esc(t.data.note)}”` : `${by} visited.` })
+      else if (t.kind === "seat") lines.push({ at: t.createdAt, text: `Sat down at a Puffer Pass table and staked 2 h of the house.` })
+      else if (t.kind === "pop") lines.push({ at: t.createdAt, text: `🐡 Held the puffer when it popped. The house flooded for 6 h.` })
+      else if (t.kind === "win") lines.push({ at: t.createdAt, text: `🏆 Last one standing at Puffer Pass: +${fmtMin(Number(t.attrs?.minutes ?? 0))} on the house from the pot.` })
       else if (t.kind === "tend") lines.push({ at: t.createdAt, text: `${by ?? "Someone"} shored up the house (+${fmtMin(Number(t.attrs?.minutes ?? 0))}).` })
     }
     lines.sort((a, b) => (a.at < b.at ? 1 : -1))
@@ -233,7 +244,8 @@ export function createHouse(deps) {
 
   function holdStart() {
     if (!cur?.home || cur.hold || cur.sealing) return
-    cur.hold = { target: cur.home.expiresAt, cap: homeMaxExpiry(headNow(), cur.home), added: 0n, timer: null, t0: performance.now() }
+    const flooded = !!floodOf(cur.life, headNow())
+    cur.hold = { target: cur.home.expiresAt, cap: flooded ? cur.home.expiresAt : homeMaxExpiry(headNow(), cur.home), added: 0n, timer: null, t0: performance.now() }
     $("h-hold")?.classList.add("holding")
     if ($("h-islander")) $("h-islander").src = spriteUrl(poseSprite(cur.home.look, "waving"))
     const step = BigInt((HOLD_TICK_MINUTES * 60) / BLOCK_SECONDS)

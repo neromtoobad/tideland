@@ -45,6 +45,15 @@ export const sfx = {
   bell() { if (muted) return; tone(880, { dur: 1.4, peak: 0.12 }); tone(1320, { dur: 1.0, peak: 0.05 }); tone(2210, { dur: 0.6, peak: 0.03 }) },
   wave() { if (muted) return; noise({ dur: 1.4, peak: 0.22, freq: 500, q: 0.4, type: "lowpass" }) },
   sink() { if (muted) return; tone(330, { dur: 0.8, peak: 0.18, glide: 90, type: "sawtooth" }); noise({ at: 0.1, dur: 0.6, peak: 0.12, freq: 700 }) },
+  // Puffer Pass
+  whoosh() { if (muted) return; noise({ dur: 0.35, peak: 0.2, freq: 900, q: 0.6 }); tone(500, { dur: 0.3, peak: 0.05, glide: 900 }) },
+  catch() { if (muted) return; tone(700, { type: "triangle", dur: 0.08, peak: 0.12 }); tone(1050, { type: "triangle", at: 0.04, dur: 0.1, peak: 0.08 }) },
+  tick(k = 0, mine = false) { if (muted) return; tone(220 + k * 380, { type: mine ? "square" : "triangle", dur: 0.05, peak: mine ? 0.05 + k * 0.06 : 0.025 + k * 0.03 }) },
+  pop() {
+    if (muted) return
+    noise({ dur: 0.5, peak: 0.6, freq: 1400, q: 0.5 }); tone(160, { type: "sine", dur: 0.35, peak: 0.5, glide: 40 })
+    noise({ at: 0.12, dur: 1.1, peak: 0.25, freq: 600, q: 0.4, type: "lowpass" })
+  },
   full() { if (muted) return; tone(660, { dur: 0.08, peak: 0.08, type: "square" }) },
   start() { if (muted) return; [0, 7, 12].forEach((s, i) => tone(262 * Math.pow(2, s / 12), { at: i * 0.12, dur: 0.5, peak: 0.16, type: "triangle" })) },
   end() { if (muted) return; [12, 7, 4, 0].forEach((s, i) => tone(262 * Math.pow(2, s / 12), { at: i * 0.14, dur: 0.6, peak: 0.14, type: "triangle" })) },
