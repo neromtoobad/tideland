@@ -104,6 +104,27 @@ there: every client recomputes them from the table's public records.
 | **WebSocket entity events** | Builds, renewals and transfers appear on every open screen without a refresh. A "Live on Arkiv" strip lists Tideland's writes as they land (throws, saves, pops, wins), each with its transaction. | [`watchLive()` / `onFeed()`](web/src/main.js) |
 | **Cursor pagination** | Every query walks all pages (`hasNextPage`/`next`). | [`collect()`](shared/tideland.js) |
 
+## On-chain proof: one transaction per feature
+
+Each transaction was decoded op by op (calldata and receipt events), not just looked up. Short-lived records like
+puffers, passes and speech have expired, as designed; their transactions stay on the chain.
+
+| Feature | Transaction | What it shows |
+|---|---|---|
+| Claim + build, predicted keys | [`0x3dc2cdaa…`](https://tiramisu.explorer.arkiv.network/tx/0x3dc2cdaabcf0a9da0953790fc58177dbb68c0258c2c4b665aba3ac7357b74d9b) | 2 creates in one tx: a parcel and a pine house whose `parcel` attribute is the parcel's key, predicted before it existed |
+| A friend's visit, one batch | [`0xeb0b1a00…`](https://tiramisu.explorer.arkiv.network/tx/0xeb0b1a008953146834b878211407c1631b19271ba9f45d25bfda1f93c69e4d10) | 6 ops: creates a visit, a meal, a tend and a signature; extends the house; hands the meal to the house's owner (`changeOwnership`) |
+| Permissionless extension by a stranger | [`0xafafed24…`](https://tiramisu.explorer.arkiv.network/tx/0xafafed241a61488ee738b05c05e0e40731922f82d09181851a7a15636f2cb18d) | [`examples/keeper.mjs`](examples/keeper.mjs) run from a fresh key: a tend record + an hour more for Kemi's house, which it doesn't own |
+| Puffer Pass serve | [`0x95f2d214…`](https://tiramisu.explorer.arkiv.network/tx/0x95f2d21479dd71d9bd249d0a76f52a9d7bc71afe36b41717f6cfb38a7576b7ac) | 3 ops: the puffer, created `readonly` with its expiry pinned to block 656020 (= its `fuse` attribute); the first pass record; the hand-over to the first holder |
+| A throw | [`0xa79b2707…`](https://tiramisu.explorer.arkiv.network/tx/0xa79b2707e6f3e82251385f1c24034ccba1797ce93752b16d8a56fde9bf259bbd) | Signed by the holder: a pass record + `changeOwnership` of the puffer to the next player |
+| Pop + payout + win | [`0x5e6a7481…`](https://tiramisu.explorer.arkiv.network/tx/0x5e6a7481e022ce97cff1a30cca57cbdae4849403aabc25e357af9c145758c07e) | Signed by the loser: the 6 h `pop` record, a 30-day `win` (pot 480 min), and the extension of the winner's house, all in one tx |
+| Storm shift seal | [`0x6c56e59d…`](https://tiramisu.explorer.arkiv.network/tx/0x6c56e59d56af7ccd871328c71bbb08c18f42b9b2bcf2745e2593dcbb76efeea3) | One batch of `atBlock` extensions on commons owned by the Harbour Trust, sent from a player's key (2 patches in this one) |
+| A run remembered by its score | [`0x0fd25669…`](https://tiramisu.explorer.arkiv.network/tx/0x0fd256697655d59cd76331150586283995b17441677c82dc189cba63b957c6fb) | A `readonly` run record whose lifetime (≈22 days) comes from its score; its payload lists its 8 seal transactions |
+| Monument, 5 years, read-only | [`0x45058ebe…`](https://tiramisu.explorer.arkiv.network/tx/0x45058ebe78aa07083398ea300401b1f44b21d33a347a277368f371c88712496d) | Claim + build of a monument: `readonly`, expiry 5 years out |
+| Level upgrade (`patchEntity`) | [`0x6173b761…`](https://tiramisu.explorer.arkiv.network/tx/0x6173b761aeb49f2828c746e54c798c7f8aec7b3d7d8be0fa94634a25d489cf94) | Patches `style` on a house; every client checks the claim against the house's distinct signers |
+| Presence as a lease | [`0xf87003da…`](https://tiramisu.explorer.arkiv.network/tx/0xf87003dac5fe338c43456835304bce886747634ce93a03634181e09e6f916cbf) | One batch: patch the islander's position (x, y) + extend the lease |
+| 60-second speech | [`0xd903e4b0…`](https://tiramisu.explorer.arkiv.network/tx/0xd903e4b017e0b5c4c48a66e4960108e41b090b6480f8a788b58cc7aa9c7e3c1a) | A `readonly` say that lives exactly 30 blocks (60 s) |
+| Guild charter | [`0x3d1dd5ff…`](https://tiramisu.explorer.arkiv.network/tx/0x3d1dd5ff68f957c22762663d75bb8352017d1dacd82135d83ee9b1044ebb0c2d) | The first Tideland entity: the Tidewrights charter, which later builds reference by key |
+
 ## Build on it (Open Source)
 
 **The people harmed are the fans and builders around a game,** who today must reverse-engineer a private protocol (as
@@ -207,6 +228,7 @@ Wallets that create Tideland entities:
 | Granite Hands founder / villagers | `0xD321C6F69862Bb9273Ec55AfDD93Df43dEDA3157` · `0x1180F5ed4E3B5BbBbAeb1F67e34EC4C60c92c70B` · `0x455bDa4E6a28342763946f3688204a44Be1EE4BC` |
 | Lamplighters founder / villagers | `0x6f5cB8FC63047Bce8Cc6C8c0ab0B2B0651BB3648` · `0x6B4744C8f41245072cA0DF98d32c34c36a2485bc` · `0x9b667162F892Cc7A7113CD00f736D03819982BED` |
 | Harbour Trust (places the commons, never maintains them) | `0x643A28f7E81f398EC0a8Bc7460aAE1abc9A1721E` |
+| A stranger's keeper bot ([`examples/keeper.mjs`](examples/keeper.mjs), a fresh key that isn't one of ours) | `0xd7C0C35F16cd2fe4F7a9b212E692EA02D65eC7e9` |
 | Players | any address: each player signs with their own key |
 
 Sample transactions (explorer):
