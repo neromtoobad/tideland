@@ -572,7 +572,7 @@ export const PUFFER = {
   tableSeconds: 1800,
   recordSeconds: 86400,
   winSeconds: 30 * 86400,
-  fuseSeconds: [20, 36],
+  fuseSeconds: [45, 75], // long enough that a pass made in time still lands when blocks are slow
   maxSeats: 6,
 }
 const record = (kind, attributes, payload, seconds, salt) => ({

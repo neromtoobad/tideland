@@ -11,6 +11,7 @@ import { spriteUrl } from "./render.js"
 import { poseSprite } from "./house.js"
 import { sfx } from "./sfx.js"
 import { celebrate } from "./celebrate.js"
+import { showGuide } from "./guide.js"
 
 const BLOCK_MS = BLOCK_SECONDS * 1000
 const fmtMin = (m) => (m < 60 ? `${m} min` : `${(m / 60).toFixed(m % 60 ? 1 : 0)} h`)
@@ -24,7 +25,7 @@ export function createPuffer(deps) {
   const t = {
     active: false, key: null, table: null, recs: [], live: [], g: null, loadedAt: 0,
     crew: new Set(), passTx: new Set(), log: [], duty: new Set(), flights: [], fx: [], hover: null,
-    throwing: null, serving: null, seen: new Map(), poppedSeen: new Set(), anim: 0, lastTick: 0, openTables: [], busy: false,
+    throwing: null, serving: null, trail: [], seen: new Map(), poppedSeen: new Set(), anim: 0, lastTick: 0, openTables: [], busy: false,
   }
   const me = () => lc(state.wallet?.address)
   const mySeat = () => t.g?.seats.find((s) => s.player === me())
@@ -64,6 +65,7 @@ export function createPuffer(deps) {
     if (!t.raf) t.raf = requestAnimationFrame(frame)
     loadCrew()
     syncHead()
+    showGuide("puffer") // once, the first time anyone opens Puffer Pass
     if (!key) { t.key = null; t.g = null; history.replaceState(null, "", "?play"); renderPanel(); loadTables(); return }
     t.key = key; t.table = null; t.recs = []; t.live = []; t.g = null; t.log = []; t.duty.clear(); t.poppedSeen.clear(); t.flights = []; t.fx = []
     history.replaceState(null, "", `?t=${key}`)
@@ -175,8 +177,9 @@ export function createPuffer(deps) {
           if (!to) return
           t.throwing = { from: cur.holder, to, at: performance.now(), puffer: cur.puffer }
           sfx.whoosh?.()
+          renderStatus()
           try { await crewCall({ op: "pass", bot: cur.holder, table: t.key, puffer: cur.puffer, round: cur.round, to }) }
-          catch (e) { if (t.throwing?.from === cur.holder) t.throwing = null; throw e }
+          catch (e) { if (t.throwing?.from === cur.holder) { t.throwing = null; renderStatus() } throw e }
         })
       }
     }
@@ -231,6 +234,7 @@ export function createPuffer(deps) {
     if (!allowedTargets(c).includes(to)) return toast(to === c.from ? `No passing straight back to ${esc(nameOf(to))}.` : "They're out.", 2200)
     t.throwing = { from: me(), to, at: performance.now(), puffer: c.puffer, mine: true }
     sfx.whoosh?.()
+    navigator.vibrate?.(20)
     renderStatus()
     try {
       const w = await ensureWallet({ quiet: true })
@@ -307,7 +311,10 @@ export function createPuffer(deps) {
       t.passTx.add(e.transactionHash)
       t.live.push({ puffer: lc(e.entityKey), creator: lc(e.previousOwner), to: lc(e.newOwner), createdAt: e.blockNumber })
       const from = lc(e.previousOwner), to = lc(e.newOwner)
-      t.flights.push({ from, to, at: performance.now() })
+      // a throw we were already animating carries on from where it is; otherwise it starts flying now
+      const nowMs = performance.now(), ours = t.throwing && t.throwing.from === from && t.throwing.to === to
+      const at = ours ? t.throwing.at : nowMs
+      t.flights.push({ from, to, at, catchAt: Math.max(at + FLY, nowMs) })
       if (t.throwing?.from === from) t.throwing = null
       sfx.catch?.()
       if (from !== me()) log(`${nameOf(from)} passed to ${nameOf(to)}`, e.transactionHash)
@@ -333,12 +340,24 @@ export function createPuffer(deps) {
     let html = ""
     if (g.phase === "lobby") html = `<b>${g.seats.length} at the table</b><span>pot ${fmtMin(g.pot)}</span>`
     else if (c) {
-      if (t.throwing?.mine) html = `<b class="go">Throwing to ${esc(nameOf(t.throwing.to))}…</b><span>sealing on Arkiv</span>`
-      else if (c.holder === me()) html = `<b class="hot">YOU HAVE THE PUFFER</b><span>tap someone to pass it</span>`
+      if (t.throwing?.mine) html = `<b class="go">Thrown to ${esc(nameOf(t.throwing.to))}!</b><span>landing on Arkiv · a block or two</span>`
+      else if (t.throwing) html = `<b>${esc(nameOf(t.throwing.from))} → ${esc(nameOf(t.throwing.to))}</b><span>landing on Arkiv · round ${c.round} · ${g.alive.length} left</span>`
+      else if (c.holder === me()) html = `<b class="hot">YOU HAVE THE PUFFER</b><span>throw it before it pops · <em id="pp-left"></em></span>`
       else html = `<b>${esc(nameOf(c.holder))} has it</b><span>round ${c.round} · ${g.alive.length} left · pot ${fmtMin(g.pot)}</span>`
     } else if (g.phase === "between" && g.last) html = `<b class="hot">${esc(nameOf(g.last.holder))} popped!</b><span>${lc(g.last.holder) === me() ? "Your" : "Their"} house floods for ${PUFFER.floodSeconds / 3600} h</span>`
     else if (g.phase === "done") html = `<b class="go">${esc(nameOf(g.winner.player))} ${g.winner.player === me() ? "win" : "wins"}!</b><span>+${fmtMin(g.win ? Number(g.win.attrs.minutes) : g.pot)} on their house</span>`
     el.innerHTML = html
+    renderThrow()
+  }
+
+  /** While you hold the puffer: one big button per player you can throw to (the easy way on a phone). */
+  function renderThrow() {
+    const bar = $("pp-throw"), c = t.g?.current
+    const show = !!(c && t.g.phase === "live" && c.holder === me() && !t.throwing)
+    bar.hidden = !show; $("pp").classList.toggle("holding", show)
+    if (!show) { bar.innerHTML = ""; return }
+    const opts = allowedTargets(c)
+    bar.innerHTML = `<div class="pp-throw-head">Throw it to…</div><div class="pp-throw-row">${opts.map((p, i) => { const s = seatOf(p); return `<button data-pp-throw="${p}"><img src="${spriteUrl(poseSprite(s?.look, "happy"))}" alt="" /><b>${esc(s?.name ?? short(p))}</b><kbd>${i + 1}</kbd></button>` }).join("")}</div>`
   }
 
   function renderPanel() {
@@ -397,6 +416,7 @@ export function createPuffer(deps) {
 
   document.addEventListener("click", (e) => {
     if (!t.active) return
+    const th = e.target.closest("[data-pp-throw]"); if (th) return throwTo(th.dataset.ppThrow)
     const s = e.target.closest("[data-pp-serve]"); if (s) { clearTimeout(t.serving?.timer); const round = t.serving?.round; t.serving = null; return serve(round, s.dataset.ppServe).catch((er) => toast(esc(er.message))) }
     const o = e.target.closest("[data-pp-open]"); if (o) return open(o.dataset.ppOpen)
     const a = e.target.closest("[data-pp]")?.dataset.pp
@@ -406,6 +426,7 @@ export function createPuffer(deps) {
     else if (a === "start") start()
     else if (a === "crew") callCrew(1)
     else if (a === "leave") close()
+    else if (a === "guide") showGuide("puffer", { force: true })
     else if (a === "build") goBuild()
     else if (a === "again") open(null).then(host)
     else if (a === "lobby") open(null)
@@ -450,7 +471,7 @@ export function createPuffer(deps) {
     if (!t.active) return
     const dt = Math.min(0.05, (now - (t.lastFrame ?? now)) / 1000); t.lastFrame = now; t.anim += dt
     // the fuse runs out between socket events: notice it locally, then confirm from the records
-    if (t.throwing && now - t.throwing.at > 12000) t.throwing = null
+    if (t.throwing && now - t.throwing.at > 40000) { t.throwing = null; renderStatus() }
     const c = t.g?.current
     if (c && headFloat() >= Number(c.fuse) && !t.duty.has(`fuse:${c.puffer}`)) {
       t.duty.add(`fuse:${c.puffer}`)
@@ -458,6 +479,8 @@ export function createPuffer(deps) {
       setTimeout(load, 1600); setTimeout(load, 4200)
     }
     if (c && now - t.lastTick > tickGap(c)) { t.lastTick = now; sfx.tick?.(swell(c), c.holder === me()) }
+    const leftEl = c && c.holder === me() ? document.getElementById("pp-left") : null
+    if (leftEl) { const sLeft = Math.max(0, (Number(c.fuse) - headFloat()) * BLOCK_SECONDS); leftEl.textContent = sLeft > 12 ? `about ${Math.ceil(sLeft)} s left` : sLeft > 0.5 ? `THROW NOW! ${Math.ceil(sLeft)} s (a pass takes a few seconds to land)` : "popping…" }
     if (t.serving) { const el = $("pp-panel").querySelector(".pp-picks + p"); if (el) el.textContent = `Picking one for you in ${Math.max(0, Math.ceil((t.serving.until - Date.now()) / 1000))} s.` }
     draw(now)
   }
@@ -475,28 +498,51 @@ export function createPuffer(deps) {
     for (const [p, a] of order) islander(p, a, now, targets.has(p), g)
     // the puffer: in someone's hands, or in the air
     if (c) {
-      const fl = t.flights[t.flights.length - 1]
-      let pos = handsOf(L.at.get(c.holder))
-      if (t.throwing && L.at.get(t.throwing.to) && L.at.get(t.throwing.from)) {
-        // until the pass is sealed the puffer is still the thrower's: it stays in their hands, aimed
-        const a = handsOf(L.at.get(t.throwing.from)), b = handsOf(L.at.get(t.throwing.to))
-        ctx.save(); ctx.setLineDash([6, 8]); ctx.lineDashOffset = -now / 30; ctx.strokeStyle = "rgba(180,85,46,.7)"; ctx.lineWidth = 3
-        ctx.beginPath(); for (let k = 0; k <= 1.001; k += 0.05) { const q = arc(a, b, k); k ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y) } ctx.stroke(); ctx.restore()
-        const wind = Math.sin(now / 90) * 6
-        pos = { x: a.x + wind, y: a.y - 6 }
-      } else if (fl && now - fl.at < 520 && L.at.get(fl.from) && L.at.get(fl.to)) {
-        const a = handsOf(L.at.get(fl.from)), b = handsOf(L.at.get(fl.to))
-        pos = arc(a, b, (now - fl.at) / 520)
+      // A throw flies at once, on a smooth arc, then hovers over the catcher ("landing on Arkiv…") until the
+      // ownership change is sealed; the socket event then drops it into their hands. Someone else's throw that we
+      // only learn about from the socket flies the same way, from the moment we hear it.
+      let pos = handsOf(L.at.get(c.holder)), spin = 0, sc = L.at.get(c.holder)?.s ?? 1, pending = null
+      const th = t.throwing, fl = t.flights[t.flights.length - 1]
+      if (th && L.at.get(th.to) && L.at.get(th.from)) {
+        const a = handsOf(L.at.get(th.from)), b = handsOf(L.at.get(th.to)), k = Math.min(1, (now - th.at) / FLY)
+        sc = lerp(L.at.get(th.from).s, L.at.get(th.to).s, k)
+        if (k < 1) { pos = arc(a, b, ease(k)); spin = ease(k) * Math.PI * 2 }
+        else { pos = { x: b.x, y: b.y - 18 + Math.sin(now / 160) * 4 }; pending = b }
+      } else if (fl && now - fl.at < FLY && L.at.get(fl.from) && L.at.get(fl.to)) {
+        const a = handsOf(L.at.get(fl.from)), b = handsOf(L.at.get(fl.to)), k = (now - fl.at) / FLY
+        sc = lerp(L.at.get(fl.from).s, L.at.get(fl.to).s, k); pos = arc(a, b, ease(k)); spin = ease(k) * Math.PI * 2
       }
-      if (pos) puffer(pos.x, pos.y, swell(c), now, c.holder === me(), 0.55 + 0.5 * (L.at.get(c.holder)?.s ?? 1))
+      // a short trail while it flies
+      if (spin && pos) { t.trail.push({ x: pos.x, y: pos.y, at: now }) }
+      t.trail = t.trail.filter((q) => now - q.at < 220)
+      for (const q of t.trail) { const a = 1 - (now - q.at) / 220; ctx.fillStyle = `rgba(255,224,138,${a * 0.5})`; ctx.beginPath(); ctx.arc(q.x, q.y, 10 * a * sc + 2, 0, Math.PI * 2); ctx.fill() }
+      if (pending) {
+        // waiting for the network: a ring that fills as blocks tick by
+        const r = 46 * sc + Math.sin(now / 200) * 3
+        ctx.save(); ctx.strokeStyle = "rgba(255,255,255,.85)"; ctx.lineWidth = 3; ctx.setLineDash([5, 7]); ctx.lineDashOffset = -now / 25
+        ctx.beginPath(); ctx.arc(pending.x, pending.y - 18, r, 0, Math.PI * 2); ctx.stroke(); ctx.restore()
+        ctx.font = `600 12px "IBM Plex Mono", monospace`; ctx.fillStyle = "#1f6e68"; ctx.textAlign = "center"
+        const label = "landing on Arkiv…", lw = ctx.measureText(label).width + 14
+        ctx.fillStyle = "rgba(251,252,250,.92)"; roundRect(pending.x - lw / 2, pending.y - 18 - r - 26, lw, 20, 10); ctx.fill()
+        ctx.fillStyle = "#1f6e68"; ctx.textBaseline = "middle"; ctx.fillText(label, pending.x, pending.y - 18 - r - 16)
+      }
+      // the catch: a little squash when it lands in someone's hands
+      const caught = !th && fl && now >= fl.catchAt && now - fl.catchAt < 260
+      const squash = caught ? 1 + Math.sin(((now - fl.catchAt) / 260) * Math.PI) * 0.18 : 1
+      if (pos) puffer(pos.x, pos.y, swell(c), now, c.holder === me() && !th, (0.55 + 0.5 * sc) * squash, spin)
     }
     // pops and splashes
     t.fx = t.fx.filter((f) => now - f.at < 1600)
     for (const f of t.fx) popFx(f, now, L)
   }
 
-  const handsOf = (a) => (a ? { x: a.x, y: a.y - 135 * a.s } : null)
-  const arc = (a, b, k) => ({ x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k - Math.sin(Math.PI * k) * 120 })
+  // held at chest height, a little to the side, so the holder's face stays visible
+  const handsOf = (a) => (a ? { x: a.x + 30 * a.s, y: a.y - 98 * a.s } : null)
+  const FLY = 650 // ms in the air
+  const lerp = (a, b, k) => a + (b - a) * k
+  const ease = (k) => (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2)
+  // a lob, not a straight line: sideways throws arc higher than straight up-the-beach ones
+  const arc = (a, b, k) => { const h = 45 + Math.abs(b.x - a.x) * 0.28 + Math.max(0, a.y - b.y) * 0.15; return { x: lerp(a.x, b.x, k), y: lerp(a.y, b.y, k) - Math.sin(Math.PI * k) * h } }
 
   let sand = null
   function beach(now) {
@@ -533,6 +579,10 @@ export function createPuffer(deps) {
     ctx.fillStyle = out ? "rgba(74,163,168,.45)" : "rgba(80,60,30,.18)"
     ctx.beginPath(); ctx.ellipse(a.x, a.y + 4, (out ? 70 : 42) * a.s, (out ? 20 : 12) * a.s, 0, 0, Math.PI * 2); ctx.fill()
     if (targetable) {
+      const n = allowedTargets(c).indexOf(p) + 1, ay = a.y - 170 * a.s - 18 + Math.sin(now / 180) * 6
+      ctx.fillStyle = "#b4552e"; ctx.beginPath(); ctx.moveTo(a.x - 11, ay - 14); ctx.lineTo(a.x + 11, ay - 14); ctx.lineTo(a.x, ay); ctx.closePath(); ctx.fill()
+      ctx.beginPath(); ctx.arc(a.x, ay - 26, 12, 0, Math.PI * 2); ctx.fill()
+      ctx.fillStyle = "#fff"; ctx.font = `700 13px "Albert Sans", system-ui`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(String(n), a.x, ay - 25.5)
       const hot = t.hover === p
       ctx.strokeStyle = hot ? "#b4552e" : "rgba(180,85,46,.55)"; ctx.lineWidth = hot ? 4 : 2.5; ctx.setLineDash(hot ? [] : [8, 6])
       ctx.beginPath(); ctx.ellipse(a.x, a.y + 4, 56 * a.s, 17 * a.s, 0, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([])
@@ -559,10 +609,10 @@ export function createPuffer(deps) {
   }
   function roundRect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath() }
 
-  function puffer(x, y, k, now, mine, scale = 1) {
+  function puffer(x, y, k, now, mine, scale = 1, spin = 0) {
     // swells from a slim fish to a spiky ball; trembles faster as the fuse runs down
     const full = sprite("puffer-full"), calm = sprite("puffer-calm")
-    const size = (64 + k * 70) * scale
+    const size = (54 + k * 60) * scale
     const tremble = k > 0.55 ? Math.sin(now / (60 - k * 40)) * (k - 0.5) * 8 : 0
     const pulse = 1 + Math.sin(now / (260 - k * 200)) * (0.03 + k * 0.06)
     const s = size * pulse
@@ -573,7 +623,7 @@ export function createPuffer(deps) {
     const img = k < 0.4 ? calm ?? full : full ?? calm
     if (img) {
       const w = s * (img.naturalWidth / img.naturalHeight)
-      ctx.save(); ctx.translate(x + tremble, y); ctx.rotate(Math.sin(now / 500) * 0.08)
+      ctx.save(); ctx.translate(x + tremble, y); ctx.rotate(Math.sin(now / 500) * 0.08 + spin)
       ctx.drawImage(img, -w / 2, -s / 2, w, s)
       ctx.restore()
     } else {
@@ -609,7 +659,15 @@ export function createPuffer(deps) {
   }
 
   // pointer: hover and throw
-  const hitAt = (x, y) => { if (!t.g) return null; for (const [p, a] of layoutSeats().at) { const L = lastHits.get(p); if (L && x >= L.x0 && x <= L.x1 && y >= L.y0 && y <= L.y1) return p } return null }
+  const hitAt = (x, y) => {
+    if (!t.g) return null
+    let best = null, bd = Infinity
+    for (const [p, a] of layoutSeats().at) {
+      const L = lastHits.get(p); if (L && x >= L.x0 && x <= L.x1 && y >= L.y0 && y <= L.y1) return p
+      const d = Math.hypot(x - a.x, y - (a.y - 80 * a.s)); if (d < bd) { bd = d; best = p }
+    }
+    return bd < 95 ? best : null // a forgiving tap on a phone: the nearest islander within reach
+  }
   canvas.addEventListener("pointermove", (e) => { t.hover = hitAt(e.clientX, e.clientY); canvas.style.cursor = t.hover && t.g?.current?.holder === me() ? "pointer" : "default" })
   canvas.addEventListener("pointerdown", (e) => { const p = hitAt(e.clientX, e.clientY); if (p && p !== me()) throwTo(p) })
   addEventListener("keydown", (e) => {

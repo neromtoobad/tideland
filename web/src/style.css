@@ -382,7 +382,7 @@ body.play .me-hud { flex-direction: column; align-items: stretch; width: 300px; 
 @keyframes pop { from { transform: scale(.6); opacity: 0 } to { transform: scale(1); opacity: 1 } }
 
 /* ---------- Puffer Pass ---------- */
-body.puffing > :not(.pp):not(.toast):not(dialog):not(.celebrate) { visibility: hidden; }
+body.puffing > :not(.pp):not(.toast):not(dialog):not(.celebrate):not(.guide) { visibility: hidden; }
 .pp { position: fixed; inset: 0; z-index: 40; background: #ead3a6; }
 #pp-canvas { position: absolute; inset: 0; display: block; touch-action: manipulation; }
 .pp-top { position: absolute; top: 12px; left: 16px; right: 16px; display: flex; align-items: center; gap: 12px; }
@@ -493,3 +493,58 @@ ol.bottles .bm { font-size: 12px; color: #6c6250; }
 a.btnlike { display: inline-flex; align-items: center; text-decoration: none; color: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; font: 600 13px "Albert Sans", sans-serif; background: var(--card); }
 
 .board2 li.muted { color: #6c6250; font-size: 13px; }
+
+/* step-by-step guide */
+.guide { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 16px; background: rgba(20, 45, 44, 0.42); backdrop-filter: blur(4px); animation: gfade .2s ease-out; }
+.guide.out { opacity: 0; transition: opacity .2s; }
+.guide-card { position: relative; width: min(440px, 100%); background: #fffdf6; border-radius: 24px; padding: 22px 22px 18px; box-shadow: 0 30px 70px -30px rgba(0, 0, 0, 0.45); }
+.guide-skip { position: absolute; top: 14px; right: 14px; z-index: 2; border: 1px solid #e6dcc2; background: rgba(255,253,246,.92); color: #6c6250; font-size: 12px; padding: 5px 11px; border-radius: 99px; }
+.guide-art { position: relative; height: 150px; display: flex; align-items: flex-end; justify-content: center; gap: 6px; background: radial-gradient(circle at 50% 70%, #e2f0ee, #fffdf6 70%); border-radius: 18px; margin-bottom: 12px; }
+.guide-art img { max-height: 132px; max-width: 34%; object-fit: contain; animation: gbob 2.6s ease-in-out infinite; }
+.guide-art img:nth-child(2) { animation-delay: .3s; } .guide-art img:nth-child(3) { animation-delay: .6s; }
+.guide-tap { position: absolute; right: 22%; bottom: 18px; font-size: 34px; animation: gtap 1.1s ease-in-out infinite; }
+.guide-step { font: 600 11px "IBM Plex Mono", monospace; letter-spacing: .08em; text-transform: uppercase; color: #2f8287; }
+.guide-card h2 { font: 400 30px/1.1 "Instrument Serif", serif; margin: 4px 0 8px; }
+.guide-card p { margin: 0 0 14px; font-size: 15px; line-height: 1.5; color: #2c3a39; }
+.guide-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.guide-dots { display: flex; gap: 6px; }
+.guide-dots i { width: 8px; height: 8px; border-radius: 50%; background: #d9e6e3; }
+.guide-dots i.on { background: #1f6e68; width: 20px; border-radius: 4px; }
+.guide-btns { display: flex; gap: 8px; }
+.guide-btns .primary { padding: 10px 18px; font-size: 14px; }
+@keyframes gfade { from { opacity: 0; } }
+@keyframes gbob { 50% { transform: translateY(-6px); } }
+@keyframes gtap { 50% { transform: translate(-6px, -10px) scale(.9); } }
+
+/* Puffer Pass: the throw bar (while you hold the puffer) */
+.pp-throw { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 5; width: min(560px, calc(100vw - 24px)); background: rgba(255, 253, 246, 0.96); border-radius: 20px; padding: 10px 12px 12px; box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.45); border: 2px solid #f2a33a; animation: ppbar .25s ease-out; }
+.pp-throw-head { font: 700 13px "Albert Sans", sans-serif; color: #b4552e; text-align: center; margin-bottom: 8px; letter-spacing: .02em; }
+.pp-throw-row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.pp-throw button { position: relative; display: grid; justify-items: center; gap: 2px; min-width: 88px; padding: 8px 10px 6px; border-radius: 14px; background: #fff; border: 1.5px solid #f0d7a6; font: 600 13px "Albert Sans", sans-serif; cursor: pointer; }
+.pp-throw button:hover, .pp-throw button:active { border-color: #b4552e; background: #fff4e6; }
+.pp-throw button img { height: 52px; }
+.pp-throw kbd { position: absolute; top: 4px; right: 6px; font: 600 10px "IBM Plex Mono", monospace; color: #b4552e; }
+.pp.holding .pp-panel.live { display: none; }
+.pp-status em { font-style: normal; color: #ffe08a; font-weight: 700; }
+@keyframes ppbar { from { transform: translate(-50%, 20px); opacity: 0; } }
+@media (max-width: 720px) { .pp-throw button { min-width: 72px; padding: 6px 8px; } .pp-throw button img { height: 44px; } .pp.holding .pp-log { display: none; } }
+
+.pp-help { background: rgba(251,252,250,.9); white-space: nowrap; }
+@media (max-width: 560px) { .pp-help { padding: 6px 9px; font-size: 12px; } .pp-top-info { font-size: 11px; padding: 5px 9px; } }
+
+/* your key: always one tap away */
+#nav-key span { font: 600 12px "IBM Plex Mono", monospace; }
+#nav-key.low span { color: #b4552e; }
+.menu-list .menu-sound { display: none; }
+.keybox { display: flex; gap: 8px; align-items: center; background: var(--code); border-radius: 12px; padding: 8px 10px; margin: 8px 0; }
+.keybox code { flex: 1; font: 12px "IBM Plex Mono", monospace; overflow-wrap: anywhere; }
+.keybal { margin: 4px 0 10px; font-size: 14px; }
+.pp-key { background: rgba(251,252,250,.9); white-space: nowrap; }
+@media (max-width: 560px) {
+  #nav-key span { display: none; }
+  .topbar #nav-sound { display: none; }
+  .menu-list .menu-sound { display: block; }
+  .pp-key { display: none; }
+}
+@media (max-width: 560px) { .landing .bottle-band { flex-wrap: wrap; row-gap: 2px; } .landing .bottle-band span { flex-basis: 100%; } .landing .pp-band span { font-size: 12.5px; } }
+@media (max-width: 720px) { .pp-log li:nth-child(n+2) { display: none; } .pp-log { top: 116px; } }

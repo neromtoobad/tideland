@@ -35,7 +35,7 @@ No server and no referee contract decide; the network's expiry does.
 | `win` | `table key`, `home key` (the winner's house), `minutes i32` (paid), `pot i32` | `{}` | 30 days | `readonly` | whoever writes the final pop, in the same batch as the payout |
 
 **Serve** (one batch): create the puffer (key predicted with `predictEntityKeys`) with an exact expiry block, create the
-first `pass` record carrying the same `fuse`, and `changeOwnership` the puffer to its first holder. Fuses are 20 to 36 s.
+first `pass` record carrying the same `fuse`, and `changeOwnership` the puffer to its first holder. Fuses are 45 to 75 s, long enough that a pass made in time still lands when the network is slow.
 
 **Pass** (one batch): create a `pass` record and `changeOwnership` the puffer to the target. Both land or neither. A
 pass that arrives after the fuse fails (the entity is gone), so a slow throw pops in your own hands.

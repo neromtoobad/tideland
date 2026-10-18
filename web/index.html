@@ -18,17 +18,20 @@
     <div class="row">
       <button class="primary" data-pp="play">🐡 Puffer Pass</button>
       <button class="ghost" data-nav="board">🏆 Island board</button>
+      <button class="ghost" data-nav="wallet" id="nav-key" aria-label="Your key and test GLM">🔑 <span id="nav-key-bal">Free key</span></button>
       <button class="ghost" data-nav="sound" id="nav-sound" aria-label="Sound">🔊</button>
       <button class="ghost" data-nav="explore" id="nav-explore">Explore the coast</button>
       <div class="menu">
         <button class="ghost" data-nav="menu" aria-label="More">⋯</button>
         <div class="menu-list" id="menu-list" hidden>
+          <button data-nav="guide">👋 How to play</button>
           <button data-nav="how">How it works</button>
           <button data-nav="bottles">🍾 Messages in bottles</button>
           <button data-nav="mirror">Read it without this site</button>
           <button data-pp="play">Puffer Pass</button>
           <button data-run="lobby">Storm shift (mini-game)</button>
           <button data-nav="wallet">Your key &amp; test GLM</button>
+          <button data-nav="sound" class="menu-sound">🔊 Sound on / off</button>
         </div>
       </div>
     </div>
@@ -116,8 +119,11 @@
       <button class="ghost" data-pp="leave">← Island</button>
       <div class="pp-title">Puffer <em>Pass</em></div>
       <div class="pp-top-info mono" id="pp-top-info"></div>
+      <button class="ghost pp-help" data-pp="guide">How to play</button>
+      <button class="ghost pp-key" data-nav="wallet">🔑 Key &amp; GLM</button>
     </div>
     <div class="pp-status" id="pp-status"></div>
+    <div class="pp-throw" id="pp-throw" hidden></div>
     <aside class="pp-panel card" id="pp-panel"></aside>
     <ol class="pp-log mono" id="pp-log"></ol>
   </section>

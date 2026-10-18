@@ -8,6 +8,7 @@ import { localWallet, injectedWallet, balanceOf, drip } from "./wallet.js"
 import { createRun } from "./run.js"
 import { createHouse } from "./house.js"
 import { createBottles } from "./bottles.js"
+import { showGuide } from "./guide.js"
 import { sfx } from "./sfx.js"
 import { createWalk } from "./walk.js"
 import { createPuffer } from "./puffer.js"
@@ -403,6 +404,8 @@ async function updateBalance() {
   try {
     state.balance = await reading(() => balanceOf(pub, state.wallet.address))
     $("wallet-bal").textContent = state.balance.text
+    $("nav-key-bal").textContent = `${Number(state.balance.text.split(" ")[0]).toFixed(3)} GLM`
+    $("nav-key").classList.toggle("low", state.balance.wei < 3_000_000_000_000_000n)
     $("wallet-dot").className = "dot " + (state.balance.wei > 0n ? "ok" : "low")
   } catch {}
 }
@@ -530,6 +533,7 @@ document.addEventListener("click", (e) => {
   else if (nav === "sound") { soundOn = !soundOn; try { localStorage.setItem("tideland.sound", soundOn ? "1" : "0") } catch {}; applySound() }
   else if (nav === "board") showBoard()
   else if (nav === "bottles") bottles.list()
+  else if (nav === "guide") showGuide("island", { force: true })
   else if (nav === "how") $("btn-how").click()
   else if (nav === "mirror") $("btn-mirror").click()
   else if (nav === "wallet") showWallet()
@@ -580,10 +584,21 @@ $("modal").addEventListener("click", (e) => { const v = e.target.closest("[data-
 async function showWallet() {
   if (!state.wallet) { state.wallet = localWallet(); try { localStorage.setItem("tideland.mode", "local") } catch {} }
   await updateBalance()
-  modal(`<h2>Your key</h2><p class="note">A small test key lives in this browser and signs your actions on Arkiv's Tiramisu testnet. It holds test GLM only; nothing here has real value.</p>
-    <pre>${state.wallet.address}\n${state.balance?.text ?? ""}</pre>
-    <div class="row"><button class="primary" data-nav="drip">Get test GLM</button><button class="ghost" data-legacy="${state.wallet.address}">What this key has done</button></div>`)
+  renderWallet()
+  const w = state.wallet, low = !state.balance || state.balance.wei < 3_000_000_000_000_000n
+  modal(`<h2>🔑 Your key</h2>
+    <p class="note">${w.kind === "local" ? "A free test key lives in this browser and signs your moves on Arkiv's Tiramisu testnet. No wallet, no sign-up, nothing of real value." : "You're playing with your own wallet, on Arkiv's Tiramisu testnet."}</p>
+    <div class="keybox"><code>${w.address}</code><button class="ghost" data-copy="${w.address}">Copy</button></div>
+    <p class="keybal">Balance: <b>${state.balance?.text ?? "…"}</b>${low ? ` · <span class="sink">low: get free test GLM below</span>` : ""}</p>
+    <div class="row"><button class="primary" data-nav="drip">Get free test GLM</button>
+      <button class="ghost" data-wallet-switch>${w.kind === "local" ? "Use my own wallet" : "Use the free key instead"}</button>
+      <button class="ghost" data-legacy="${w.address}">What this key has done</button></div>
+    <p class="note small">Test GLM is free and only works on the testnet. The game tops your key up by itself when you play; this button does it by hand (up to 3 times an hour). You can also claim from the <a href="https://hub.arkiv.network" target="_blank" rel="noopener">Arkiv Hub faucet</a> and send it to this address.</p>`)
 }
+$("modal").addEventListener("click", (e) => {
+  const c = e.target.closest("[data-copy]"); if (c) { navigator.clipboard?.writeText(c.dataset.copy); toast("Address copied.", 2000); return }
+  if (e.target.closest("[data-wallet-switch]")) walletAction("btn-switch").then(showWallet)
+})
 $("modal").addEventListener("click", (e) => { const l = e.target.closest("[data-legacy]"); if (l) { e.preventDefault(); showLegacy(l.dataset.legacy) } })
 document.addEventListener("click", (e) => { if (e.target.closest("[data-myhome]")) house.open(house.myHome()) })
 $("cta-save").onclick = () => {
@@ -692,7 +707,7 @@ function frame(now) {
   renderWallet(); updateBalance()
   // A first-time visitor sees the landing at once; its "who needs help" list fills in when the island has been read.
   { const q0 = new URLSearchParams(location.search)
-    if (!q0.get("h") && !location.pathname.startsWith("/h/") && !house.myHome() && !["run", "explore", "play", "t", "x", "embed"].some((k) => q0.has(k))) house.home() }
+    if (!q0.get("h") && !location.pathname.startsWith("/h/") && !house.myHome() && !["run", "explore", "play", "t", "x", "embed"].some((k) => q0.has(k))) { house.home(); showGuide("island") } }
   toast("Reading the island from Arkiv…", 0)
   const slowNote = setTimeout(() => { if (!$("toast").hidden) toast(`Arkiv's testnet is answering slowly right now. Still reading the island… <a href="/reader.html" target="_blank" rel="noopener">or open the reader</a>`, 0) }, 12000)
   // the node sometimes turns away a burst of reads for a moment: try a few times before saying anything
