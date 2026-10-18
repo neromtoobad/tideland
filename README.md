@@ -18,7 +18,7 @@ Your house only lives as long as other people keep it afloat, which is exactly w
 - **Data contract:** [`arkiv/schema.md`](arkiv/schema.md) · **Friction report:** [`arkiv/friction.md`](arkiv/friction.md)
 - **Network:** Arkiv Tiramisu testnet (chain `7738577`), `@arkiv-network/sdk` 0.8.1
 - **Tracks:** Censorship Resistance · Open Source
-- **Demo video (2:44):** <!-- VIDEO: paste the YouTube link here --> see the Devfolio submission
+- **Demo video (2:39):** [watch it on X](https://x.com/neromtoobad/status/2111793345852813357)
 - **Messages in bottles:** write a message, throw it into the sea. It's read-only and owned by a burn address from the transaction that makes it, so **nobody can delete it, not even you or us**. It floats as long as strangers keep it afloat.
 - **Read it without us:** [tideland.nerom.site/reader.html](https://tideland.nerom.site/reader.html), one HTML file with no build and no backend. Save it and open it from disk; add `?rpc=<url>` to read through any Arkiv node. Source: [`web/public/reader.html`](web/public/reader.html)
 - **Build on it without asking:** [`examples/raw-consumer.mjs`](examples/raw-consumer.mjs), a client in plain JSON-RPC, no SDK, no install; [`examples/keeper.mjs`](examples/keeper.mjs), a stranger's bot that keeps houses afloat with its own key
