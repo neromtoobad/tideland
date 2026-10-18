@@ -7,6 +7,8 @@ import { createView, draw, loadSprites, spriteUrl, characterFor } from "./render
 import { localWallet, injectedWallet, balanceOf, drip } from "./wallet.js"
 import { createRun } from "./run.js"
 import { createHouse } from "./house.js"
+import { createBottles } from "./bottles.js"
+import { sfx } from "./sfx.js"
 import { createWalk } from "./walk.js"
 import { createPuffer } from "./puffer.js"
 import { ambient, setMuted } from "./sfx.js"
@@ -107,6 +109,7 @@ function feedLabel(ev) {
   const t = state.things.get(ev.key) ?? gone.get(ev.key)
   if (!t) return null
   const k = t.kind, nm = t.data?.name || t.data?.islander
+  if (ev.type === "ExpiryExtended" && k === "bottle") return "🍾 a bottle was kept afloat"
   if (ev.type === "ExpiryExtended") return k === "home" ? `⛵ ${nm || "a house"} kept afloat` : t.attrs?.material && MATERIALS[t.attrs.material]?.commons ? `🔧 ${nm || t.attrs.material} patched` : `⏳ ${nm || k} renewed`
   if (ev.type === "OwnershipTransferred") return k === "puffer" ? "🐡 the puffer was thrown" : k === "meal" ? `🍲 a meal handed to ${homeName(t.attrs?.home)}` : k === "parcel" ? `🤝 ${nm || "land"} changed hands` : null
   if (ev.type !== "EntityCreated") return null
@@ -115,6 +118,7 @@ function feedLabel(ev) {
     meal: `🎣 a meal for ${homeName(t.attrs?.home)}`, sign: `✍️ signed ${homeName(t.attrs?.home)}'s book`, sleep: "😴 an islander went to bed",
     say: `💬 “${String(t.data?.text ?? "").slice(0, 40)}”`, seat: "🪑 someone sat at a Puffer Pass table", table: "🐡 a Puffer Pass table opened",
     pass: "🐡 the puffer was thrown", pop: `💥 the puffer popped on ${homeName(t.attrs?.home)}`, win: `🏆 ${homeName(t.attrs?.home)} won Puffer Pass`,
+    bottle: "🍾 a message in a bottle was thrown", keep: "🍾 a bottle was kept afloat",
     structure: `🔨 ${nm || t.attrs?.material || "something"} built`, parcel: null, run: "🌩️ a storm shift was sealed", inscription: "🪨 words carved on the land", guild: "🏳️ a guild was founded",
   })[k] ?? null
 }
@@ -447,6 +451,7 @@ $("btn-how").onclick = () => modal(`<h2>How the tide works</h2>
 
 $("btn-mirror").onclick = () => modal(`<h2>Read the coast without us</h2>
   <p>If this site went dark tomorrow, the world would still be there. Any program can draw it straight from Arkiv:</p>
+  <p><a href="/reader.html" target="_blank" rel="noopener"><b>Open the reader</b></a>: one HTML file that reads the island straight from Arkiv, with no build and no backend. Save it and it works from your disk. It can also rewind the island to hours ago.</p>
   <pre>npm i @arkiv-network/sdk viem
 
 import { createPublicClient } from "@arkiv-network/sdk"
@@ -477,6 +482,11 @@ async function ensureRunWallet({ quiet = false } = {}) {
   return state.wallet
 }
 
+let bottleCache = { at: 0, list: [] }
+function bottleList() {
+  if (performance.now() - bottleCache.at > 1000) bottleCache = { at: performance.now(), list: bottles.live().map((b) => Object.assign(b, { keepers: bottles.keepers(b).length })) }
+  return bottleCache.list
+}
 const house = createHouse({
   state, view, headNow, pub: () => pub, ensureWallet: ensureRunWallet, toast, explorer: EXPLORER, refresh, short, esc, same,
   onOpen: ({ panel } = {}) => { view.selected = null; renderInspector(); setMode(walk?.active && (panel || walk.active) ? "play" : "focus") },
@@ -519,6 +529,7 @@ document.addEventListener("click", (e) => {
   } else if (nav === "explore") setMode("explore")
   else if (nav === "sound") { soundOn = !soundOn; try { localStorage.setItem("tideland.sound", soundOn ? "1" : "0") } catch {}; applySound() }
   else if (nav === "board") showBoard()
+  else if (nav === "bottles") bottles.list()
   else if (nav === "how") $("btn-how").click()
   else if (nav === "mirror") $("btn-mirror").click()
   else if (nav === "wallet") showWallet()
@@ -537,10 +548,32 @@ function showBoard() {
   const signs = [...state.things.values()].filter((t) => t.kind === "sign" && t.expiresAt > head)
   const loved = homes.map((h) => ({ h, n: new Set(signs.filter((s) => s.home === h.key && !same(s.creator, h.owner)).map((s) => s.creator.toLowerCase())).size })).sort((a, b) => b.n - a.n).slice(0, 8)
   const oldest = homes.slice().sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1)).slice(0, 8)
+  // the season: 30-day win / tend / keep records, grouped by who they credit
+  const all = [...state.things.values()].filter((t) => t.expiresAt > head)
+  const homeOf = new Map(all.filter((t) => t.kind === "home").map((h) => [h.key, h]))
+  const nameOfAddr = (a) => { const h = [...homeOf.values()].find((x) => same(x.owner, a)); return h ? h.data.islander || h.data.name : short(a) }
+  const champMap = new Map()
+  for (const w of all.filter((t) => t.kind === "win")) {
+    const key = w.attrs?.home, c = champMap.get(key) ?? { h: homeOf.get(key), name: homeOf.get(key)?.data?.islander || `🌊 sunk house ${short(key)}`, wins: 0, minutes: 0 }
+    c.wins++; c.minutes += Number(w.attrs?.minutes ?? 0); champMap.set(key, c)
+  }
+  const champs = [...champMap.values()].sort((a, b) => b.wins - a.wins || b.minutes - a.minutes).slice(0, 8)
+  const keepMap = new Map()
+  for (const t of all.filter((x) => x.kind === "tend" || x.kind === "keep")) {
+    const who = t.creator.toLowerCase(), k = keepMap.get(who) ?? { who, homes: new Set(), bottles: new Set() }
+    const target = t.kind === "tend" ? homeOf.get(t.home ?? t.attrs?.home) : null
+    if (t.kind === "tend" && target && !same(target.owner, who)) k.homes.add(target.key)
+    if (t.kind === "keep") k.bottles.add(t.attrs?.bottle)
+    keepMap.set(who, k)
+  }
+  const keepers = [...keepMap.values()].map((k) => ({ name: nameOfAddr(k.who), homes: k.homes.size, bottles: k.bottles.size })).filter((k) => k.homes + k.bottles > 0).sort((a, b) => b.homes + b.bottles - (a.homes + a.bottles)).slice(0, 8)
   const row = (h, right) => `<li data-visit="${h.key}"><img src="${spriteUrl(h.style || "pine")}" alt="" /><b>${esc(h.data.islander || h.data.name)}</b><span>${right}</span></li>`
   modal(`<h2>Island board</h2><p class="note">Both lists are plain Arkiv queries over live entities, and both forget: signatures last 30 days, and a house that sinks drops off.</p>
     <div class="boards"><div><h3>Most loved</h3><ol class="board2">${loved.map(({ h, n }) => row(h, `${n} ${n === 1 ? "friend" : "friends"}`)).join("")}</ol></div>
-    <div><h3>Longest afloat</h3><ol class="board2">${oldest.map((h) => row(h, blocksToText(head - h.createdAt))).join("")}</ol></div></div>`)
+    <div><h3>Longest afloat</h3><ol class="board2">${oldest.map((h) => row(h, blocksToText(head - h.createdAt))).join("")}</ol></div>
+    <div><h3>🐡 Puffer Pass champions</h3><ol class="board2">${champs.length ? champs.map((c) => `<li ${c.h ? `data-visit="${c.h.key}"` : ""}><img src="${spriteUrl(c.h?.style || "pine")}" alt="" /><b>${esc(c.name)}</b><span>${c.wins} ${c.wins === 1 ? "win" : "wins"} · +${(c.minutes / 60).toFixed(0)} h won</span></li>`).join("") : `<li class="muted">No wins this season yet.</li>`}</ol></div>
+    <div><h3>⛵ Top keepers</h3><ol class="board2">${keepers.length ? keepers.map((k) => `<li><img src="${spriteUrl("lighthouse")}" alt="" /><b>${esc(k.name)}</b><span>${k.homes} ${k.homes === 1 ? "house" : "houses"} saved${k.bottles ? ` · ${k.bottles} 🍾` : ""}</span></li>`).join("") : `<li class="muted">Nobody yet.</li>`}</ol></div></div>
+    <p class="note">The season is the last 30 days: <code>win</code>, <code>tend</code> and <code>keep</code> records live that long, then the board forgets them. Names come from each signer's own house; the rest are addresses (<code>$creator</code>).</p>`)
 }
 $("modal").addEventListener("click", (e) => { const v = e.target.closest("[data-visit]"); if (v) { $("modal").close(); house.open(v.dataset.visit, { panel: !!walk?.active }) } })
 
@@ -585,7 +618,9 @@ canvas.addEventListener("pointermove", (e) => {
 canvas.addEventListener("pointerup", (e) => {
   if (runner.active) { runner.pointerUp(); return }
   canvas.classList.remove("dragging")
-  if (drag && !drag.moved) select(view.toGrid(e.clientX, e.clientY))
+  const hitBottle = drag && !drag.moved && (view.bottleSpots ?? []).find((b) => Math.hypot(b.x - e.clientX, b.y - e.clientY) < b.r)
+  if (hitBottle) bottles.open(hitBottle.key)
+  else if (drag && !drag.moved) select(view.toGrid(e.clientX, e.clientY))
   drag = null
 })
 canvas.addEventListener("wheel", (e) => { e.preventDefault(); zoomBy(Math.exp(-e.deltaY * 0.0015), e.clientX, e.clientY) }, { passive: false })
@@ -636,6 +671,8 @@ addEventListener("resize", () => view.resize())
 addEventListener("keydown", (e) => { if (runner.key(e, true)) return; if (walk?.active && document.body.classList.contains("play") && walk.key(e, true)) return; if (e.key === "Escape") select(null) })
 addEventListener("keyup", (e) => { runner.key(e, false); walk?.key(e, false) })
 
+const bottles = createBottles({ state, headNow, pub: () => pub, ensureWallet: ensureRunWallet, toast, modal, esc, short, explorer: EXPLORER, refresh, sfx })
+
 // ---------------- boot ----------------
 
 let last = performance.now()
@@ -644,7 +681,7 @@ function frame(now) {
   runner.update(dt)
   const playing = walk?.active && document.body.classList.contains("play")
   if (playing) walk.update(dt)
-  draw(view, { cells: state.cells, guilds: state.guilds, moods: state.moods ?? new Map(), head: state.head, headAt: state.headAt, scene: playing ? walk.scene() : null })
+  draw(view, { cells: state.cells, guilds: state.guilds, moods: state.moods ?? new Map(), head: state.head, headAt: state.headAt, scene: playing ? walk.scene() : null, bottles: bottleList() })
   requestAnimationFrame(frame)
 }
 

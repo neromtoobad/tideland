@@ -231,6 +231,33 @@ from `ExpiryExtended` events (they carry the new `expiresAt`), so a batch only e
 | Lifetime | **30 days**, renewed by the founder. A charter nobody renews disbands the guild by protocol. |
 | Membership | a parcel or structure joins by carrying the guild's key in its `guild` attribute. |
 
+### `bottle` — a message nobody can take down
+
+| | |
+|---|---|
+| Attributes | `app`, `world`, `kind="bottle"`, `bx i32`, `by i32` (a spot in the sea, outside the 32×32 land grid, so the land layout never sees it) |
+| Payload (JSON) | `{ "text": "...", "from": "..." }` (text max 140 chars, `from` optional; synthetic content only) |
+| Lifetime | **1 day** to start; every keep adds **6 h**, never more than **7 days** ahead |
+| Flags | `readonly` **and** `permissionlessExtension` |
+| `$creator` | whoever threw it |
+| `$owner` | **`0x000000000000000000000000000000000000dEaD`**, set by `changeOwnership` in the same `executeBatch` that creates it |
+
+Why it can't be taken down: `readonly` means no one can edit the words, and only an entity's owner can delete it. The
+owner is a burn address no one has a key for, so no one (the writer, Tideland, anyone) can delete a bottle. Its fate is
+only its lifetime, and `permissionlessExtension` puts that in the hands of whoever reads it. Measured 18 Oct: the
+thrower's own `deleteEntity` was refused with *"entity … is owned by 0x…dEaD"*.
+
+### `keep` — one stranger keeping a bottle afloat
+
+| | |
+|---|---|
+| Attributes | `app`, `world`, `kind="keep"`, `bottle key`, `minutes i32` (life added) |
+| Payload (JSON) | `{ "note": "..." }` (max 80 chars) |
+| Lifetime | 30 days |
+| Flags | `readonly` |
+| Written | in **one batch** with the bottle's extension (`extensions: [bottle → atBlock(target)]` + this create) |
+| `$creator` | the keeper: "kept afloat by" is a list of real signers |
+
 ## What stays off Arkiv, on purpose
 
 - **Realtime play.** Cursor movement and animation stay in the client. Only durable world changes become entities.
@@ -255,9 +282,14 @@ All expressed with the SDK query builder (`@arkiv-network/sdk/query`). `NOW` is 
 | A house's guestbook | `app = 'tideland' AND world = 's1' AND kind = 'tend' AND home = key(<home>)` |
 | Everyone a player has saved | `kind = 'tend'` + `createdBy(address)` |
 | Houses sinking now ("Save a sinking house") | `kind = 'home'`, sorted by `$expiresAt` client-side; also in the tide map query |
+| Messages in bottles | `app = 'tideland' AND world = 's1' AND kind = 'bottle'` (owner is always `0x…dEaD`) |
+| Who kept a bottle afloat | `app = 'tideland' AND world = 's1' AND kind = 'keep' AND bottle = key(<bottle>)`, distinct `$creator` |
+| The season board (30 days) | `kind = 'win'` grouped by `home`; `kind = 'tend'` and `kind = 'keep'` grouped by `$creator` (client-side, from the world read) |
+| **Rewind the tide:** the island N hours ago | the world query with `atBlock: NOW − N × 1800`; diffed against now for "lost to the tide" and "new since" |
 | Keepers remembered (leaderboard) | `app = 'tideland' AND world = 's1' AND kind = 'run'`, sorted by `score` client-side (no server ordering) |
 
-Every query is paged with the SDK cursor (`hasNextPage()` / `next()`, max 200 per page). There is no server-side
+Every query is paged with the SDK cursor (`hasNextPage()` / `next()`, max 200 per page), and a read that needs more
+than one page is pinned to its first page's block (`atBlock`), because a cursor goes stale after one 2-second block. There is no server-side
 ordering, so clients sort by `$createdAt` / `$expiresAt` locally.
 
 ## Live updates

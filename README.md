@@ -19,6 +19,7 @@ Your house only lives as long as other people keep it afloat, which is exactly w
 - **Network:** Arkiv Tiramisu testnet (chain `7738577`), `@arkiv-network/sdk` 0.8.1
 - **Tracks:** Censorship Resistance · Open Source
 - **Demo video (2:44):** <!-- VIDEO: paste the YouTube link here --> see the Devfolio submission
+- **Messages in bottles:** write a message, throw it into the sea. It's read-only and owned by a burn address from the transaction that makes it, so **nobody can delete it, not even you or us**. It floats as long as strangers keep it afloat.
 - **Read it without us:** [tideland.nerom.site/reader.html](https://tideland.nerom.site/reader.html), one HTML file with no build and no backend. Save it and open it from disk; add `?rpc=<url>` to read through any Arkiv node. Source: [`web/public/reader.html`](web/public/reader.html)
 - **Build on it without asking:** [`examples/raw-consumer.mjs`](examples/raw-consumer.mjs), a client in plain JSON-RPC, no SDK, no install; [`examples/keeper.mjs`](examples/keeper.mjs), a stranger's bot that keeps houses afloat with its own key
 - **Tests:** `npm test` (the Puffer Pass rules as a pure function, including the cheats every client must ignore)
@@ -47,6 +48,16 @@ tideland.nerom.site tonight:
   [`0xafafed24…`](https://tiramisu.explorer.arkiv.network/tx/0xafafed241a61488ee738b05c05e0e40731922f82d09181851a7a15636f2cb18d);
 - anyone can host the web client (`npm run build`, static files), run the bots, or write a new client. The rules are pure
   functions of public records ([`resolveTable()`](shared/tideland.js), with [tests](test/rules.test.mjs)), not server logic.
+
+**Words nobody can take down.** The sharpest version of this is the messages in bottles. A bottle is created
+`readonly` + `permissionlessExtension` and, in the same transaction, handed to `0x…dEaD`, an address no one holds a key for.
+No one can edit it and no one can delete it: when the writer tried, Arkiv refused (*"entity … is owned by 0x…dEaD"*).
+Whether it survives is decided only by strangers who keep it afloat. There's no moderator to pressure, because there's no
+owner. Proof: [throw](https://tiramisu.explorer.arkiv.network/tx/0x9756a150f738fa3326fea17e3222a8c08c742b696d12c368e7a86a4c3615c15d) ·
+[kept afloat by a stranger](https://tiramisu.explorer.arkiv.network/tx/0x5abd13238cb19dbff25a3f85341bd0c5deee6e85e937950cdf247daddd3f74e7).
+
+**History nobody can rewrite.** The reader's *Rewind the tide* shows the island 1 to 48 hours ago, using Arkiv's own
+answers for an older block (`atBlock`), not a log we keep, and lists what the tide took since.
 
 What Tideland is *not*: proof against Arkiv itself going away (it runs on the Tiramisu testnet). It removes the
 **operator** as the point of takedown, which is exactly what killed *The Crew*. See [Limits](#limits-and-who-you-trust).
@@ -101,6 +112,9 @@ there: every client recomputes them from the table's public records.
 | **Batch + predicted keys** | Claiming land and building on it is one atomic transaction. The house references its parcel's key before that key exists. | [`claimAndBuild()`](shared/tideland.js) |
 | **Range queries on numeric attributes** | `x`/`y` are `i32`, so drawing a region is a range query. | [`worldQuery()`](shared/tideland.js) |
 | **Query on `$expiresAt`** | The tide map, "what sinks in the next day", is one range query on the system expiry. | [`tideQuery()`](shared/tideland.js) |
+| **Burned ownership: words nobody can delete** | A message in a bottle is created `readonly` + `permissionlessExtension` and handed to `0x…dEaD` in the same batch, so no one can edit or delete it; strangers decide its lifetime by keeping it afloat (each keep = an extension + a signed `keep` record). | [`throwBottle()` / `keepBottle()`](shared/tideland.js), [`bottles.js`](web/src/bottles.js) |
+| **`atBlock`: the island as it was** | The reader's "Rewind the tide" reads the world 1 to 48 h ago and lists what sank and what's new since. Multi-page reads are also pinned to one block so they stay consistent. | [`reader.html`](web/public/reader.html), [`collect()`](shared/tideland.js) |
+| **A season board from signed records** | Puffer Pass champions (30-day `win` records) and top keepers (distinct houses and bottles each `$creator` kept afloat). | [`showBoard()`](web/src/main.js) |
 | **WebSocket entity events** | Builds, renewals and transfers appear on every open screen without a refresh. A "Live on Arkiv" strip lists Tideland's writes as they land (throws, saves, pops, wins), each with its transaction. | [`watchLive()` / `onFeed()`](web/src/main.js) |
 | **Cursor pagination** | Every query walks all pages (`hasNextPage`/`next`). | [`collect()`](shared/tideland.js) |
 
@@ -123,6 +137,8 @@ puffers, passes and speech have expired, as designed; their transactions stay on
 | Level upgrade (`patchEntity`) | [`0x6173b761…`](https://tiramisu.explorer.arkiv.network/tx/0x6173b761aeb49f2828c746e54c798c7f8aec7b3d7d8be0fa94634a25d489cf94) | Patches `style` on a house; every client checks the claim against the house's distinct signers |
 | Presence as a lease | [`0xf87003da…`](https://tiramisu.explorer.arkiv.network/tx/0xf87003dac5fe338c43456835304bce886747634ce93a03634181e09e6f916cbf) | One batch: patch the islander's position (x, y) + extend the lease |
 | 60-second speech | [`0xd903e4b0…`](https://tiramisu.explorer.arkiv.network/tx/0xd903e4b017e0b5c4c48a66e4960108e41b090b6480f8a788b58cc7aa9c7e3c1a) | A `readonly` say that lives exactly 30 blocks (60 s) |
+| A bottle nobody can delete | [`0x9756a150…`](https://tiramisu.explorer.arkiv.network/tx/0x9756a150f738fa3326fea17e3222a8c08c742b696d12c368e7a86a4c3615c15d) | One batch: create the bottle `readonly` + `permissionlessExtension`, then `changeOwnership` to `0x…dEaD`. A `deleteEntity` by its writer was refused afterwards |
+| A stranger keeps it afloat | [`0x5abd1323…`](https://tiramisu.explorer.arkiv.network/tx/0x5abd13238cb19dbff25a3f85341bd0c5deee6e85e937950cdf247daddd3f74e7) | A fresh key extends the burned bottle by 6 h and signs a `keep` record, in one batch |
 | Guild charter | [`0x3d1dd5ff…`](https://tiramisu.explorer.arkiv.network/tx/0x3d1dd5ff68f957c22762663d75bb8352017d1dacd82135d83ee9b1044ebb0c2d) | The first Tideland entity: the Tidewrights charter, which later builds reference by key |
 
 ## Build on it (Open Source)
@@ -163,6 +179,10 @@ If the anonymous budget is used up (HTTP 429 `ANON_COST_LIMITED`), wait for the 
 **Fastest, in a browser: open the reader.** https://tideland.nerom.site/reader.html: homes and who kept them afloat, the tide map, Puffer
 Pass winners, guestbook levels checked against real signers, and an address lookup by `$creator`/`$owner`. It's one file
 that talks to Arkiv directly, so you can also save it and open it from disk.
+
+**Throw a bottle:** menu (⋯) → **🍾 Messages in bottles** → *Throw a bottle*. Then open it from the sea: "Owned by:
+nobody (0x…dEaD)". Keep someone else's afloat and your address appears under "kept afloat by". In the reader, the
+bottles table shows the same, and **⏪ Rewind the tide** shows the island hours ago.
 
 **1. Read the world without our site** (no wallet needed):
 
@@ -209,7 +229,7 @@ What a player or a judge has to trust, and what they don't:
 | Arkiv / Tiramisu | **Yes** | It's a testnet: if the network goes down or is reset, so is the island |
 
 Known limits:
-- **Owners can still delete their own entities, even `readonly` ones** (and extend or transfer them; see
+- **Owners can still delete their own entities, even `readonly` ones** (except bottles, which have no owner) (and extend or transfer them; see
   [friction #7](arkiv/friction.md)). Monuments can be taken down by their owner. The puffer's fuse is safe because the
   rules read the readonly `fuse` attribute, not the expiry.
 - **Bots act in public CI with our secrets.** If we stop the workflow, they stop tending. Their houses then sink like

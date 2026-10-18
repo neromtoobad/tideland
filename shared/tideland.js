@@ -752,3 +752,70 @@ export function solidAt(cells, x, y) {
   if (c?.structure) return true
   return !c?.parcel && !c?.inscriptions?.length && SOLID_DECOR.has(decorAt(x, y))
 }
+
+// ---------- Messages in bottles: words nobody can take down ----------
+// A bottle is born read-only AND with permissionlessExtension, and in the same transaction its ownership goes to an
+// unowned burn address. From then on nobody can edit it or delete it: not the writer, not us, not anyone. Its only
+// fate is its lifetime, and only strangers decide that, by keeping it afloat. Each keep is a signed `keep` record, so
+// "kept afloat by" is a list of real $creators. Bottles float in the sea around the island (`bx`, `by` sit outside the
+// 32×32 land grid, so the land layout never sees them).
+export const BOTTLE = {
+  burn: "0x000000000000000000000000000000000000dEaD",
+  startSeconds: 24 * 3600, // a new bottle floats for a day
+  keepSeconds: 6 * 3600, // each keep adds 6 hours
+  maxSeconds: 7 * 86400, // keepers can't push it more than a week ahead
+  keepRecordSeconds: 30 * 86400,
+  maxChars: 140,
+}
+/** A spot in the sea around the island, on a ring 2-4 cells off the coast. */
+export function bottleSpot(seed = Math.random()) {
+  const side = Math.floor(seed * 4), t = Math.floor(((seed * 4) % 1) * (SIZE + 6)) - 3, off = 2 + Math.floor(((seed * 97) % 1) * 3)
+  return side === 0 ? { bx: t, by: -off } : side === 1 ? { bx: SIZE - 1 + off, by: t } : side === 2 ? { bx: t, by: SIZE - 1 + off } : { bx: -off, by: t }
+}
+export async function throwBottle(wallet, reader, { text, from, spot = bottleSpot() }) {
+  const words = String(text ?? "").trim().slice(0, BOTTLE.maxChars)
+  if (!words) throw new Error("A bottle needs a message.")
+  const [b] = await reader.predictEntityKeys({ owner: wallet.account.address, count: 1 })
+  const r = await wallet.executeBatch({
+    creates: [{
+      attributes: { ...common("bottle"), bx: i32(spot.bx), by: i32(spot.by) },
+      payload: jsonToPayload({ text: words, from: String(from ?? "").slice(0, 40) }),
+      contentType: "application/json",
+      expires: ExpirationTime.fromSeconds(BOTTLE.startSeconds),
+      flags: { readonly: true, permissionlessExtension: true },
+      salt: b.salt,
+    }],
+    // the same transaction gives it away for good: no owner can ever delete it
+    ownershipChanges: [{ entityKey: b.key, newOwner: BOTTLE.burn }],
+  })
+  return { ...r, key: b.key }
+}
+/** Keep a bottle afloat: one batch extends it and signs a `keep` record (readonly, 30 days). */
+export async function keepBottle(wallet, reader, { bottle, note }) {
+  for (let attempt = 0; ; attempt++) {
+    const head = (await reader.getBlockTiming()).currentBlock
+    const cap = head + BigInt(BOTTLE.maxSeconds / BLOCK_SECONDS)
+    const base = bottle.expiresAt > head ? bottle.expiresAt : head
+    let target = base + BigInt(BOTTLE.keepSeconds / BLOCK_SECONDS)
+    if (target > cap) target = cap
+    if (target <= bottle.expiresAt) return { full: true }
+    try {
+      const r = await wallet.executeBatch({
+        extensions: [{ entityKey: bottle.key, expires: ExpirationTime.atBlock(target) }],
+        creates: [{
+          attributes: { ...common("keep"), bottle: keyAttr(bottle.key), minutes: i32(Math.round((Number(target - bottle.expiresAt) * BLOCK_SECONDS) / 60)) },
+          payload: jsonToPayload({ note: String(note ?? "").slice(0, 80) }),
+          contentType: "application/json",
+          expires: ExpirationTime.fromSeconds(BOTTLE.keepRecordSeconds),
+          flags: { readonly: true },
+        }],
+      })
+      return { ...r, target }
+    } catch (e) {
+      if (attempt > 0 || !/shorten/i.test(`${e?.shortMessage} ${e?.message} ${e?.details}`)) throw e
+      bottle = toThing(await reader.getEntity(bottle.key))
+    }
+  }
+}
+export const bottlesQuery = (client) => client.select(FIELDS).where(base("bottle"))
+export const keepsQuery = (client, bottleKey) => client.select(FIELDS).where(...base("keep"), eq("bottle", keyAttr(bottleKey)))

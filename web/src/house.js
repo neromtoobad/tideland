@@ -74,6 +74,7 @@ export function createHouse(deps) {
     history.replaceState(null, "", location.pathname)
     $("house").innerHTML = `<div class="landing">
       <button class="pp-band" data-pp="play"><img src="${spriteUrl("puffer-full")}" alt="" /><div><b>Puffer Pass</b><span>Hot potato with a pufferfish. Its Arkiv expiry is the fuse, and your house is the stake.</span></div><em>Play →</em></button>
+      <button class="bottle-band" data-nav="bottles">🍾 <b>Messages in bottles</b><span>Nobody can delete them, not even the writer. Strangers keep them afloat.</span></button>
       <div class="trio">${["weaver", "fisher", "carpenter", "kid", "elder"].map((l) => `<img src="${spriteUrl(l + "-waving")}" alt="" />`).join("")}</div>
       <h2>Keep an islander alive</h2>
       <p class="lead">A little islander moves into a house by the sea. They need things, and you can't give them everything yourself.</p>

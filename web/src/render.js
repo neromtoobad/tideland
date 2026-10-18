@@ -137,6 +137,7 @@ export function draw(view, world) {
   if (run) drawRunLayer(view, world, run, head, w, h, t, now)
 
   drawBoats(view, w, h, t)
+  drawBottles(view, world.bottles, w, h, t)
   drawSky(view, world, head, w, h, t)
   // labels go on top of everything so they stay readable
   drawOverlays(ctx, view, figures, scene, w, h, t)
@@ -467,6 +468,37 @@ function drawDecor(ctx, x, y, sx, sy, w, h, t) {
 }
 
 const BOATS = [{ k: "boat-sail", side: 0, at: 0.2, speed: 0.012 }, { k: "boat-row", side: 1, at: 0.55, speed: -0.008 }, { k: "boat-sail", side: 1, at: 0.15, speed: 0.01 }, { k: "boat-row", side: 0, at: 0.8, speed: -0.006 }]
+// Messages in bottles bobbing off the coast. Drawn with plain canvas shapes; a glow ring for the most-kept ones.
+function drawBottles(view, bottles, w, h, t) {
+  if (!bottles?.length) return
+  const { ctx } = view
+  view.bottleSpots = []
+  for (const b of bottles) {
+    const bx = Number(b.attrs?.bx), by = Number(b.attrs?.by)
+    if (!Number.isFinite(bx) || !Number.isFinite(by)) continue
+    const seed = parseInt(String(b.key).slice(-6), 16) % 1000 / 1000
+    const { sx, sy } = view.toScreen(bx + 0.5, by + 0.5)
+    const bob = Math.sin(t * 1.8 + seed * 9) * 3 * view.zoom, tilt = Math.sin(t * 1.3 + seed * 5) * 0.35 - 0.6
+    const s = Math.max(0.9, view.zoom * 1.1)
+    view.bottleSpots.push({ key: b.key, x: sx, y: sy + bob - 6 * s, r: 22 * s })
+    ctx.save(); ctx.translate(sx, sy + bob)
+    // ripple
+    ctx.strokeStyle = "rgba(255,255,255,.55)"; ctx.lineWidth = 1.5
+    ctx.beginPath(); ctx.ellipse(0, 4 * s, 16 * s + Math.sin(t * 2 + seed) * 2, 4 * s, 0, 0, Math.PI * 2); ctx.stroke()
+    if ((b.keepers ?? 0) > 0) { ctx.fillStyle = `rgba(255,216,138,${0.25 + 0.15 * Math.sin(t * 2 + seed * 3)})`; ctx.beginPath(); ctx.arc(0, -4 * s, 18 * s, 0, Math.PI * 2); ctx.fill() }
+    ctx.rotate(tilt)
+    // glass
+    ctx.fillStyle = "rgba(120,190,170,.85)"; ctx.strokeStyle = "rgba(40,90,80,.9)"; ctx.lineWidth = 1.4
+    ctx.beginPath(); ctx.roundRect(-5 * s, -14 * s, 10 * s, 18 * s, 4 * s); ctx.fill(); ctx.stroke()
+    ctx.beginPath(); ctx.roundRect(-2.5 * s, -20 * s, 5 * s, 7 * s, 1.5 * s); ctx.fill(); ctx.stroke()
+    // cork and the rolled note
+    ctx.fillStyle = "#b07a45"; ctx.fillRect(-2.5 * s, -23 * s, 5 * s, 4 * s)
+    ctx.fillStyle = "#f6edd6"; ctx.fillRect(-2.5 * s, -10 * s, 5 * s, 10 * s)
+    ctx.fillStyle = "rgba(255,255,255,.6)"; ctx.fillRect(-3.5 * s, -12 * s, 1.5 * s, 12 * s)
+    ctx.restore()
+  }
+}
+
 function drawBoats(view, w, h, t) {
   const { ctx } = view
   for (const b of BOATS) {

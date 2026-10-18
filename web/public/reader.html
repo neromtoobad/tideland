@@ -83,6 +83,18 @@
       <span class="q">kind = str('sign') · a house levels up with distinct signers ($creator), which nobody can fake</span>
       <table><thead><tr><th>House</th><th>Distinct signers</th><th>Level earned</th></tr></thead><tbody id="signs"></tbody></table>
     </section>
+    <section class="card" style="grid-column: 1 / -1">
+      <h2>🍾 Messages in bottles</h2>
+      <span class="q">kind = str('bottle') · read-only, extendable by anyone, and owned by a burn address (0x…dEaD) from the transaction that made it: nobody can edit or delete one</span>
+      <table><thead><tr><th>Message</th><th>Thrown by · owner</th><th>Kept afloat by</th><th>Sinks in</th></tr></thead><tbody id="bottles"></tbody></table>
+    </section>
+    <section class="card" style="grid-column: 1 / -1">
+      <h2>⏪ Rewind the tide</h2>
+      <p class="muted" style="margin:0">See the island as it stood earlier. These are Arkiv's own answers for an older block (<code>atBlock</code>), not a log anyone keeps.</p>
+      <div class="bar" id="rewind" style="margin:10px 0"><button class="ghost" data-back="1">1 h ago</button><button class="ghost" data-back="6">6 h ago</button><button class="ghost" data-back="12">12 h ago</button><button class="ghost" data-back="24">24 h ago</button><button class="ghost" data-back="48">2 days ago</button></div>
+      <span class="q" id="q-rewind">pick a time</span>
+      <div id="rewindOut" class="muted"></div>
+    </section>
     <section class="card">
       <h2>Look anyone up</h2>
       <p class="muted" style="margin:0">Everything an address built (<code>$creator</code>, forever) and holds (<code>$owner</code>), straight from Arkiv.</p>
@@ -120,11 +132,11 @@ async function rpc(method, params) {
 }
 const decode = (hex) => { try { return JSON.parse(new TextDecoder().decode(Uint8Array.from(hex.slice(2).match(/../g) ?? [], (b) => parseInt(b, 16)))) } catch { return {} } }
 // Every page of a query, all read at one block: a cursor goes stale after a block (2 s), so pin with atBlock.
-async function query(q) {
+async function query(q, at) {
   const opts = { select: SELECT, limit: "0xc8" }
-  let page = await rpc("arkiv_query", [q, opts])
+  let page = await rpc("arkiv_query", [q, at ? { ...opts, atBlock: "0x" + at.toString(16) } : opts])
   const atBlock = page.blockNumber
-  if (page.cursor) page = await rpc("arkiv_query", [q, { ...opts, atBlock }])
+  if (page.cursor && !at) page = await rpc("arkiv_query", [q, { ...opts, atBlock }])
   const out = []
   for (;;) {
     for (const e of page.data) out.push({ ...e, expiresAt: BigInt(e.expiresAt), createdAt: BigInt(e.createdAt ?? 0), a: Object.fromEntries(e.attributes.map((x) => [x.name, x.value])), data: decode(e.payload ?? "0x") })
@@ -134,6 +146,7 @@ async function query(q) {
 }
 
 let head = 0n
+let nowLive = []
 const left = (block) => {
   const s = Number(block - head) * 2
   if (s <= 0) return "gone"
@@ -185,6 +198,12 @@ async function read() {
       return { h, n, earned }
     }).sort((a, b) => b.n - a.n).map(({ h, n, earned }) => `<tr><td>${link(h.key, `${h.data.islander || "Islander"} · ${h.data.name || ""}`)}</td><td>${n}</td><td><span class="tag">${earned}</span>${earned !== h.a.style ? ` <span class="muted">(claims ${esc(h.a.style)})</span>` : ""}</td></tr>`).join("")
 
+    // messages in bottles: who threw, who kept them afloat (keep records' $creator), and who owns them (nobody)
+    const keeps = by("keep")
+    const bottles = by("bottle").map((b) => ({ b, keepers: [...new Set(keeps.filter((k) => k.a.bottle === b.key && k.creator !== b.creator).map((k) => k.creator))] })).sort((x, y) => y.keepers.length - x.keepers.length)
+    $("bottles").innerHTML = bottles.map(({ b, keepers }) => `<tr><td>${link(b.key, "“" + (b.data.text || "") + "”")}${b.data.from ? ` <span class="muted">— ${esc(b.data.from)}</span>` : ""}</td><td class="mono">${short(b.creator)}<br>owner ${short(b.owner)}</td><td class="mono">${keepers.length ? keepers.slice(0, 3).map(short).join("<br>") + (keepers.length > 3 ? `<br>+${keepers.length - 3}` : "") : "<span class='muted'>nobody yet</span>"}</td><td>${left(b.expiresAt)}</td></tr>`).join("") || `<tr><td colspan="4" class="muted">No bottles afloat right now. Throw one at tideland.nerom.site (menu → Messages in bottles).</td></tr>`
+    nowLive = live
+
     const counts = {}
     for (const e of live) counts[e.a.kind] = (counts[e.a.kind] || 0) + 1
     $("kinds").innerHTML = Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<tr><td><span class="tag">${esc(k)}</span></td><td>${n}</td></tr>`).join("")
@@ -208,6 +227,24 @@ async function lookup(address) {
   } catch (e) { $("whoOut").textContent = e.message }
 }
 
+async function rewind(hours) {
+  const at = head - BigInt(hours * 1800)
+  $("q-rewind").textContent = `${BASE}   ·   atBlock ${at.toLocaleString()} (≈ ${hours} h ago)`
+  $("rewindOut").textContent = "Reading the island as it stood then…"
+  try {
+    const { out } = await query(BASE, at)
+    const then = out.filter((e) => e.expiresAt > at)
+    const nowKeys = new Set(nowLive.map((e) => e.key)), thenKeys = new Set(then.map((e) => e.key))
+    const gone = then.filter((e) => !nowKeys.has(e.key)), born = nowLive.filter((e) => !thenKeys.has(e.key))
+    const name = (e) => e.data.islander || e.data.name || (e.a.kind === "bottle" ? "“" + (e.data.text || "").slice(0, 30) + "…”" : e.a.kind)
+    const tally = (xs) => Object.entries(xs.reduce((m, e) => ((m[e.a.kind] = (m[e.a.kind] || 0) + 1), m), {})).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${n} ${k}`).join(" · ") || "nothing"
+    const big = (xs) => xs.filter((e) => ["home", "structure", "bottle", "win", "guild"].includes(e.a.kind)).slice(0, 10).map((e) => link(e.key, name(e))).join(", ")
+    $("rewindOut").innerHTML = `<p style="margin:6px 0"><b>${then.length}</b> entities were standing at block ${at.toLocaleString()}, against <b>${nowLive.length}</b> now.</p>
+      <p style="margin:6px 0"><b>Lost to the tide since then (${gone.length}):</b> ${esc(tally(gone))}${big(gone) ? `<br><span class="muted">including</span> ${big(gone)}` : ""}</p>
+      <p style="margin:6px 0"><b>New since then (${born.length}):</b> ${esc(tally(born))}${big(born) ? `<br><span class="muted">including</span> ${big(born)}` : ""}</p>`
+  } catch (e) { $("rewindOut").textContent = `Couldn't read that far back: ${e.message}` }
+}
+$("rewind").onclick = (e) => { const b = e.target.closest("[data-back]"); if (b) rewind(Number(b.dataset.back)) }
 $("reload").onclick = read
 $("who").onsubmit = (e) => { e.preventDefault(); lookup($("addr").value.trim()) }
 $("whoOut").onclick = (e) => { const a = e.target.closest("[data-addr]"); if (a) { e.preventDefault(); lookup(a.dataset.addr) } }

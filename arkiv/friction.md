@@ -224,4 +224,7 @@ page's block, and starts over on a stale cursor or a read that hangs past 20 s.
 | Range queries on `i32` attributes `x`, `y` (region / single cell) | Work as documented. |
 | `watchEntityEvents` over `webSocket()` with no `fromBlock` | Events arrived in the browser and drove the UI without polling. |
 | Read-after-write | Receipts took ~6.3 s (≈3 blocks); `arkiv_query` reflected the change **~300 ms after the receipt** (3 runs: 267, 370, 309 ms). |
+| `executeBatch`: create (`readonly` + `permissionlessExtension`, predicted key) + `changeOwnership` to `0x…dEaD` (a message in a bottle) | Owner became the burn address in the same tx; the writer's later `deleteEntity` was refused: *"entity … is owned by 0x…dEaD, not …"*. |
+| `executeBatch` extension of that burned entity by an unrelated key, + a `keep` create | Worked: +6 h (774,353 → 785,153), `keep` record signed by the stranger. |
+| `atBlock` reads 1, 6 and 24 h back (world of ~400 entities) | 0.43–0.54 s each on 18 Oct morning; 72 h back returned the island before its first homes. Under load the same pinned reads took 5–13 s. |
 | `$createdAt` returned in results but not filterable | As documented; our claim rule sorts by it client-side. |
