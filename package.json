@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "art": "node scripts/art.mjs"
+    "art": "node scripts/art.mjs",
+    "test": "node --test test/rules.test.mjs"
   },
   "keywords": [],
   "author": "",

@@ -301,14 +301,17 @@ async function patient(fn, tries = 3) {
 }
 
 /** Walks every page of a query (max 200 per page) and returns plain world objects. A cursor is bound to the block it
- * was issued at, and blocks come every 2 s, so a multi-page read can go stale halfway ("cursor belongs to a different
- * query, block or select — start a new page-through"). Retrying the same cursor can't help: start over instead. */
+ * was issued at and blocks come every 2 s, so an unpinned multi-page read goes stale halfway ("cursor belongs to a
+ * different query, block or select — start a new page-through"). So a read that needs more than one page is re-run
+ * pinned to the first page's block (`atBlock`), and every later page comes from that one snapshot. A hung or stale
+ * read still starts over, as a safety net. */
 const staleCursor = (e) => /different query, block or select|new page-through|timed out|took too long/i.test(`${e?.data?.message ?? ""} ${e?.shortMessage ?? ""} ${e?.message ?? ""}`)
-export async function collect(builder, restarts = 3) {
+export async function collect(builder, restarts = 2) {
   for (let attempt = 0; ; attempt++) {
     try {
-      const out = []
       let page = await patient(() => builder.limit(200).fetch())
+      if (page.hasNextPage()) { const at = page.blockNumber; page = await patient(() => builder.atBlock(at).limit(200).fetch()) }
+      const out = []
       for (;;) {
         for (const e of page.entities) out.push(toThing(e))
         if (!page.hasNextPage()) break

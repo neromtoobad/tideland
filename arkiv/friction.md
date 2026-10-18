@@ -6,6 +6,23 @@ was hit or measured during this build (15 Oct 2026). Nothing is hypothetical.
 **Environment:** `@arkiv-network/sdk` 0.8.1 · `viem` 2.57.7 · Node 24.21.0 (macOS) · Chrome (Claude desktop browser pane) ·
 Tiramisu testnet, public RPC `https://rpc.tiramisu.db-chain.testnet.arkiv.network`.
 
+## Summary, ordered by impact on users
+
+| # | Issue | Impact on Tideland | Status |
+|---|---|---|---|
+| 1 | 429 + long `Retry-After` is silently slept through by the default transport | The game froze for minutes; looked like an outage | Worked around (`retryCount: 0`, relay) |
+| 10 | `next()` goes stale after one 2-s block unless the query is pinned with `.atBlock()` | 15 s blank first screen; failed bot runs | Fixed by pinning |
+| 2 | Query cost (100 units flat, 10,000 anonymous window) is undocumented and hidden | Our first client burned a visitor's budget in under an hour | Worked around (one debounced re-read) |
+| 7 | `readonly` doesn't freeze expiry | The puffer's holder could have extended the fuse | Worked around (`fuse` attribute) |
+| 4 | `ExpiryExtended` names the owner, not the extender | One extra `getTransaction` per event to show who tended | Worked around |
+| 8 | No event when an entity expires | Every client estimates "it popped" from the head block | Worked around |
+| 3 | `predictEntityKeys` missing on the wallet client | Confusing, cheap | Worked around |
+| 5, 6 | Faucet pays only the signed-in wallet; stale README snippets | Minor | Noted |
+
+**The one thing we'd fix first:** make every query failure say what happened and never hang: a typed `QueryError` kind
+for budget/rate limits (429, `ANON_COST_LIMITED`) and for stale cursors, a default transport that doesn't sleep through
+`Retry-After`, and `next()` that pins to its page's block. Items 1, 2b and 10 all come from those three gaps.
+
 ---
 
 ## 1. An exhausted anonymous budget looks like a 27-minute hang, not an error
@@ -73,6 +90,9 @@ entities in 2 pages, keyed). We could not tell from the error whether a budget, 
 **What would fix it:** document `-32005` (what limit, and whether to retry), and give it a distinct `QueryError` kind
 instead of `cursor`. **Workaround:** [`collect()`](../shared/tideland.js) retries `-32005` with a short backoff, reads run
 one after another instead of in parallel, and the page treats `-32005` like a 429 when choosing the relay.
+
+**Update, 18 Oct:** we found the cause. The error's `data.message` says the cursor belongs to an older block: see
+item 10. Retrying the same cursor was the wrong fix; pinning the query with `.atBlock()` is the right one.
 
 ## 3. `predictEntityKeys` is not on the wallet client
 
@@ -148,28 +168,34 @@ and the extra reads.
 promise resolved a few seconds later. We drive the UI from the event, not the receipt. A pass that reaches the node after
 the fuse block fails as expected ("entity not found"), and the player sees "too late: it popped in your hands".
 
-## 10. A cursor is bound to a block, and blocks come every 2 s (18 Oct)
+## 10. `next()` goes stale after one block unless you pin the query yourself (18 Oct)
 
-**Surface:** `arkiv_query` pagination (`QueryResult.next()`), `@arkiv-network/sdk` 0.8.1.
+**Surface:** `arkiv_query` pagination (`QueryResult.next()`, `SelectQueryBuilder.atBlock()`), `@arkiv-network/sdk` 0.8.1.
 
-**Expected:** a multi-page read (our world is 316 entities, 2 pages of 200) either succeeds or fails in a way a simple
-retry fixes.
+**Expected:** the `cursor()` JSDoc says "Pagination normally goes through `QueryResult.next`, which carries the cursor
+for you", so walking a 2-page result with `next()` should just work.
 
-**Actual:** the second page intermittently comes back as `QueryError: Query rejected (cursor, -32005): Request exceeds
-defined limit.` with `data.message` = *"cursor belongs to a different query, block or select — start a new
-page-through"*. Retrying `next()` with the same cursor (what our item 2b workaround did) cannot succeed once a new block
-has landed. From a fresh browser the failing page was also **held for ~10 s** before the rejection, so the first screen
-of the game waited 15+ s. It also killed our guild bots' CI runs whenever it coincided with a separate bot bug.
+**Actual:** a cursor is bound to the block it was issued at (the same JSDoc says so, further down), and Tiramisu makes a
+block every 2 s. Any `next()` that runs after a new block fails with `QueryError: Query rejected (cursor, -32005):
+Request exceeds defined limit.` and `data.message` = *"cursor belongs to a different query, block or select — start a
+new page-through"*. Our item 2b workaround (retry the same `next()`) could never succeed. From a fresh browser the
+stale page was also **held ~10 s** before the rejection, so the game's first screen waited 15+ s. The page already
+carries its `blockNumber`, but `next()` doesn't pin to it.
 
-**Steps to reproduce:** create ~250 entities under one query, then in a loop:
-`let p = await q.limit(200).fetch(); await new Promise(r => setTimeout(r, 2500)); await p.next()`. The `next()` rejects
-with the message above. Measured 18 Oct on our world query: `next()` immediately → 3 of 3 succeed; after 2.5 s or
-5 s → 3 of 3 rejected.
+**Steps to reproduce** (measured 18 Oct on our 316-entity world query, 2 pages):
+```js
+const p = await client.select().where(eq("app", "tideland")).limit(200).fetch()
+await new Promise((r) => setTimeout(r, 2500))
+await p.next() // rejected; 3 of 3 runs (immediately: 3 of 3 succeed)
+```
+Pinned, the same wait is fine (3 of 3): `client.select().where(...).atBlock(p.blockNumber).limit(200).fetch()` → wait 5 s
+→ `next()` succeeds.
 
-**What would fix it:** have the SDK restart the page-through itself when it sees this error (it knows the query), or
-pin the cursor to the block of the first page so later pages are served from that snapshot. Give this case its own
-`QueryError` kind instead of the generic `-32005`. **Workaround:** [`collect()`](../shared/tideland.js) restarts the
-whole page-through on this message (and on a read timeout, now 8 s), up to three times.
+**What would fix it:** have `QueryResult.next()` send `atBlock: this.blockNumber` automatically (it has it), or make
+`fetch()` pin by default when it returns a cursor. Until then, say in the pagination docs that walks longer than one
+block need `.atBlock()`, and give this case its own `QueryError` kind instead of the generic `-32005`.
+**What we changed:** [`collect()`](../shared/tideland.js) re-runs any read that needs a second page pinned to the first
+page's block, and starts over on a stale cursor or a read that hangs past 8 s.
 
 ---
 

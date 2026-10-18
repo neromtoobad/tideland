@@ -18,7 +18,34 @@ Your house only lives as long as other people keep it afloat, which is exactly w
 - **Data contract:** [`arkiv/schema.md`](arkiv/schema.md) · **Friction report:** [`arkiv/friction.md`](arkiv/friction.md)
 - **Network:** Arkiv Tiramisu testnet (chain `7738577`), `@arkiv-network/sdk` 0.8.1
 - **Tracks:** Censorship Resistance · Open Source
+- **Demo video (2:44):** <!-- VIDEO: paste the YouTube link here --> see the Devfolio submission
+- **Build on it without asking:** [`examples/raw-consumer.mjs`](examples/raw-consumer.mjs), a client in plain JSON-RPC, no SDK, no install
+- **Tests:** `npm test` (the Puffer Pass rules as a pure function, including the cheats every client must ignore)
 - Built for *Arkiv: Global Tour Stop* (9–18 Oct 2026). Tideland won 1st place in the Arkiv Ideathon (Aug 2026) as an idea and data model; this repo is the first real build.
+
+## Who is censored today, and what changes (Censorship Resistance)
+
+**The people harmed are players whose worlds live on someone else's server.** When an online-only game's operator
+stops paying for it, everything players built is gone, and nobody else is allowed to keep it running:
+
+- Ubisoft switched off the servers of *The Crew* on 31 March 2024. The always-online game has been unplayable since,
+  for everyone who bought it ([The Sixth Axis](https://www.thesixthaxis.com/2023/12/14/the-original-the-crew-is-going-offline-in-march-2024/)).
+- Fans had to reverse-engineer the servers' answers to bring it back offline. The *The Crew Unlimited* emulator was
+  announced for 15 September 2025 ([Checkpoint Gaming](https://checkpointgaming.net/news/2025/09/modders-save-ubisofts-the-crew-with-a-release-date-imminent/)).
+- The *Stop Killing Games* European Citizens' Initiative, asking that bought games stay playable after support ends,
+  collected **1,294,188 verified signatures** ([Destructoid](https://www.destructoid.com/the-final-count-of-stop-killing-games-verified-signatures-is-in-and-it-proves-that-gamers-can-really-come-together-when-needed/)).
+
+**What changes with Tideland, from day one.** Nothing of the world lives on our side. If we stopped paying for
+tideland.nerom.site tonight:
+- every house, guestbook signature, win and storm patch can still be read and queried from Arkiv by anyone: with
+  [`cli/tide.mjs`](cli/tide.mjs), with the [raw consumer](examples/raw-consumer.mjs), or with the curl below;
+- houses keep living as long as *other players* keep them afloat. Their lifetimes are enforced by the network, and
+  `permissionlessExtension` means no one needs our permission (or our keys) to extend them;
+- anyone can host the web client (`npm run build`, static files), run the bots, or write a new client. The rules are pure
+  functions of public records ([`resolveTable()`](shared/tideland.js), with [tests](test/rules.test.mjs)), not server logic.
+
+What Tideland is *not*: proof against Arkiv itself going away (it runs on the Tiramisu testnet). It removes the
+**operator** as the point of takedown, which is exactly what killed *The Crew*. See [Limits](#limits-and-who-you-trust).
 
 ## Why it needs Arkiv
 
@@ -73,7 +100,37 @@ there: every client recomputes them from the table's public records.
 | **WebSocket entity events** | Builds, renewals and transfers appear on every open screen without a refresh. | [`watchLive()`](web/src/main.js) |
 | **Cursor pagination** | Every query walks all pages (`hasNextPage`/`next`). | [`collect()`](shared/tideland.js) |
 
+## Build on it (Open Source)
+
+**The people harmed are the fans and builders around a game,** who today must reverse-engineer a private protocol (as
+*The Crew Unlimited* did) or ask for an API key that can be revoked. Tideland's whole world is a documented public
+dataset, and you need nobody's permission to use it:
+
+- **The data contract:** [`arkiv/schema.md`](arkiv/schema.md) lists every entity type, attribute, lifetime and query.
+  Everything Tideland writes carries `app = "tideland"`, `world = "s1"`.
+- **A client in ~60 lines with no dependencies:** [`examples/raw-consumer.mjs`](examples/raw-consumer.mjs) speaks plain
+  JSON-RPC (`arkiv_query`, `eth_blockNumber`), was written only from the schema, and prints whose house sinks next and
+  who has been keeping it afloat (by real `$creator`). Run it with `node examples/raw-consumer.mjs`; nothing to install.
+- **The rules, importable:** [`shared/tideland.js`](shared/tideland.js) is one ES module (queries, writes,
+  `resolveTable`) used by our web client, CLI and bots alike. Import it to write a bot, a map, a leaderboard or a
+  rival game on the same island.
+- **Write your own bot:** our nine guild bots ([`scripts/bots.mjs`](scripts/bots.mjs)) are ordinary players with their
+  own keys, running in public CI. Yours can sit at a Puffer Pass table, tend houses or found a guild the same way.
+- **Stability promise:** through judging and beyond, `world = "s1"` keeps its attribute names and meanings. New
+  attributes are only added; anything breaking moves to `world = "s2"`, so `s1` readers never break.
+
 ## Reproduce it
+
+**0. No install, just curl** (the tide map: everything that sinks within 24 h):
+
+```bash
+RPC=https://rpc.tiramisu.db-chain.testnet.arkiv.network
+HEAD=$(curl -s $RPC -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' | sed -E 's/.*"result":"([^"]+)".*/\1/')
+curl -s $RPC -H 'content-type: application/json' -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"arkiv_query\",\"params\":[\"app = str('tideland') AND world = str('s1') AND \$expiresAt < u64($((HEAD + 43200)))\",{\"limit\":\"0xc8\",\"select\":{\"key\":true,\"owner\":true,\"expiresAt\":true,\"attributes\":true}}]}"
+```
+
+If the anonymous budget is used up (HTTP 429 `ANON_COST_LIMITED`), wait for the window to reset or add
+`-H "X-API-KEY: <your key from hub.arkiv.network>"` (see [friction #1](arkiv/friction.md)).
 
 **1. Read the world without our site** (no wallet needed):
 
@@ -90,15 +147,43 @@ The exact query behind the tide map:
 app = str('tideland') AND world = str('s1') AND $expiresAt < u64(<head + 43200>)
 ```
 
-**2. Play a Keeper Run:** open https://tideland.nerom.site and press **Start a storm shift**, pick a keeper, start.
+**2. Play Puffer Pass:** open https://tideland.nerom.site → **🐡 Puffer Pass**. Move in first if asked (one transaction;
+your browser key gets test GLM automatically). The island crew (bots with their own keys) sit with you. Tap a player to
+throw: each throw is one `executeBatch` (a signed `pass` record + `changeOwnership`), linked in the table log. When the
+fuse block passes, the puffer is gone from every query and the holder's house floods.
+
+**3. Play a Keeper Run:** open https://tideland.nerom.site and press **Start a storm shift**, pick a keeper, start.
 Your browser makes a local test key and tops it up with test GLM automatically. Click a commons with a red ring to run
 there and hold to patch. Watch the HUD's batch counter and "last tx" link: each one is an `executeBatch` on Tiramisu.
 
-**3. Build:** press **Play with a local key**, then **Get test GLM**. Click an open cell, name it,
+**4. Build:** press **Play with a local key**, then **Get test GLM**. Click an open cell, name it,
 pick a material and **Claim this cell**: a parcel and a house are created in one batch. Find a lighthouse you don't own and
 **Tend the light**. Click any address to see what it built and what it holds.
 
-**4. Run the web client locally:** `npm run dev` → http://localhost:5174
+**5. Run the web client and the tests locally:** `npm run dev` → http://localhost:5174 · `npm test`
+
+## Limits, and who you trust
+
+What a player or a judge has to trust, and what they don't:
+
+| Part | Trusted? | Why |
+|---|---|---|
+| The world's state and history | No, it's on Arkiv | Anyone can read and check it; lifetimes are enforced by the network |
+| Puffer Pass outcomes | No | Every client recomputes them from public records; invalid passes are ignored ([tests](test/rules.test.mjs)) |
+| `api/crew.js` | **Yes, for the bots only** | It holds the nine bots' keys and signs their seats, passes and pops. It can't move a human's puffer or house; on-chain ownership checks stop it |
+| `api/drip.js` | Barely | Sends test GLM; it never writes entities |
+| `api/rpc.js` | Barely | A read-only relay used only when a visitor's anonymous budget runs out; it can't write |
+| tideland.nerom.site | For convenience | Anyone can build and host the client from this repo |
+| Arkiv / Tiramisu | **Yes** | It's a testnet: if the network goes down or is reset, so is the island |
+
+Known limits:
+- **Owners can still delete their own entities, even `readonly` ones** (and extend or transfer them; see
+  [friction #7](arkiv/friction.md)). Monuments can be taken down by their owner. The puffer's fuse is safe because the
+  rules read the readonly `fuse` attribute, not the expiry.
+- **Bots act in public CI with our secrets.** If we stop the workflow, they stop tending. Their houses then sink like
+  anyone else's.
+- **Anonymous reads are rate-limited** (10,000 units per window, 100 per query). A heavy reader needs their own key.
+- **No personal data at all.** Islander names are invented; players are keys.
 
 ## On-chain evidence (Tiramisu)
 
@@ -130,6 +215,8 @@ arkiv/friction.md    what got in the way, with versions and repro steps
 shared/tideland.js   the contract in code, shared by every client
 web/                 the web client (Vite, canvas, no framework)
 cli/tide.mjs         a second, independent client
+examples/            a third client in raw JSON-RPC, no SDK (build on it)
+test/                the Puffer Pass rules, tested as a pure function (npm test)
 scripts/bots.mjs     the founding guilds
 api/                 drip (test GLM) and read-only relay; no world logic
 art/contact.png      the sprite sheet (Higgsfield renders, processed by scripts/art.mjs)
@@ -139,6 +226,8 @@ art/contact.png      the sprite sheet (Higgsfield renders, processed by scripts/
 
 The idea, the five entity types and the material-lifetime table come from the Tideland Ideathon entry (concept page,
 August 2026: https://tideland-arkiv.vercel.app, no code). Everything in this repository, including the Arkiv integration,
-the client, the CLI and the bots, was written from 15 October 2026. Sprites were generated for this build with Higgsfield.
+the client, the CLI and the bots, was written from 15 October 2026. **Baseline commit:**
+[`f166fc2e6428c22cb0f944b9d24306d35e9f4e92`](https://github.com/neromtoobad/tideland/commit/f166fc2e6428c22cb0f944b9d24306d35e9f4e92)
+(15 Oct 2026, the first commit; nothing before it was reused). Sprites were generated for this build with Higgsfield.
 
 MIT licensed. All on-chain content is synthetic.
