@@ -580,6 +580,7 @@ function frame(now) {
   requestAnimationFrame(frame)
   try { if (localStorage.getItem("tideland.mode") === "local") state.wallet = localWallet() } catch {}
   renderWallet(); updateBalance()
+  toast("Reading the island from Arkiv…", 0)
   // the node sometimes turns away a burst of reads for a moment: try a few times before saying anything
   for (let i = 0; i < 4; i++) {
     try { await refresh(); $("toast").hidden = true; break } catch (err) {

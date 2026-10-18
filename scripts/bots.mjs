@@ -239,13 +239,13 @@ async function tick() {
   await safely("wander", wander)
   await Promise.all(BOTS.map(async (b) => {
     const me = b.account.address.toLowerCase(), g = GUILDS[b.guild]
-    const mine = [...w.cells.values()].filter((c) => c.structure && c.structure.owner.toLowerCase() === me)
+    const mine = [...w.cells.values()].filter((c) => c.structure?.owner?.toLowerCase() === me) // skips cells reserved locally this tick
     for (const c of mine) {
       const s = c.structure, frac = lifeLeft(s, w.h)
       const onFlats = s.data.name?.endsWith("Camp")
       // Guild houses are tended when they fall below 40%; a quarter of the time a villager forgets.
       if (!onFlats && frac < 0.4 && Math.random() > 0.25 && s.material !== "monument") {
-        await safely(`${g.name} renews ${s.data.name}`, () => renew(b.wallet, { structure: s, parcel: c.parcel?.owner.toLowerCase() === me ? c.parcel : null }))
+        await safely(`${g.name} renews ${s.data.name}`, () => renew(b.wallet, { structure: s, parcel: c.parcel?.owner?.toLowerCase() === me ? c.parcel : null }))
       }
     }
     // Lamplighters keep every lighthouse on the coast lit, whoever owns it (permissionless extension).
@@ -266,7 +266,7 @@ async function tick() {
       if (cell) { w.cells.set(`${cell.x}:${cell.y}`, { parcel: true }); await safely("flats camp", () => claimAndBuild(b.wallet, { x: cell.x, y: cell.y, name: `${pick(PLACES)} Camp`, material: "driftwood" })) }
     }
     if (Math.random() < 0.12) {
-      const c = pick([...w.cells.values()]); if (c) await safely("inscribe", () => inscribe(b.wallet, { x: c.x, y: c.y, text: pick(LINES), span: pick(["day", "week"]) }))
+      const c = pick([...w.cells.values()].filter((v) => Number.isInteger(v.x))); if (c) await safely("inscribe", () => inscribe(b.wallet, { x: c.x, y: c.y, text: pick(LINES), span: pick(["day", "week"]) }))
     }
     // Rarely, a founder hands a house to a villager: the builder's name stays, the holder changes.
     if (b.role === "founder" && Math.random() < 0.08) {

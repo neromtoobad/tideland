@@ -262,7 +262,7 @@ const envKey = () => globalThis.process?.env?.ARKIV_ACCESS_KEY || undefined
  * (ANON_COST_LIMITED), and viem's default retry-with-backoff turns that into a silent ~40 s hang.
  */
 function transport({ rpc = RPC_URL, apiKey = envKey() } = {}) {
-  return http(rpc, { retryCount: 0, timeout: 20_000, fetchOptions: apiKey ? { headers: { "X-API-KEY": apiKey } } : undefined })
+  return http(rpc, { retryCount: 0, timeout: 8_000, fetchOptions: apiKey ? { headers: { "X-API-KEY": apiKey } } : undefined })
 }
 
 export function publicClient({ ws = false, rpc, apiKey } = {}) {
@@ -294,23 +294,32 @@ const pause = (ms) => new Promise((r) => setTimeout(r, ms))
 async function patient(fn, tries = 3) {
   for (let i = 0; ; i++) {
     try { return await fn() } catch (e) {
-      if (i >= tries - 1 || !/-32005|exceeds defined limit/i.test(String(e?.message ?? e))) throw e
+      if (i >= tries - 1 || staleCursor(e) || !/-32005|exceeds defined limit/i.test(String(e?.message ?? e))) throw e
       await pause(1200 * (i + 1))
     }
   }
 }
 
-/** Walks every page of a query (max 200 per page) and returns plain world objects. */
-export async function collect(builder) {
-  const out = []
-  let page = await patient(() => builder.limit(200).fetch())
-  for (;;) {
-    for (const e of page.entities) out.push(toThing(e))
-    if (!page.hasNextPage()) break
-    const prev = page
-    page = await patient(() => prev.next())
+/** Walks every page of a query (max 200 per page) and returns plain world objects. A cursor is bound to the block it
+ * was issued at, and blocks come every 2 s, so a multi-page read can go stale halfway ("cursor belongs to a different
+ * query, block or select — start a new page-through"). Retrying the same cursor can't help: start over instead. */
+const staleCursor = (e) => /different query, block or select|new page-through|timed out|took too long/i.test(`${e?.data?.message ?? ""} ${e?.shortMessage ?? ""} ${e?.message ?? ""}`)
+export async function collect(builder, restarts = 3) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const out = []
+      let page = await patient(() => builder.limit(200).fetch())
+      for (;;) {
+        for (const e of page.entities) out.push(toThing(e))
+        if (!page.hasNextPage()) break
+        const prev = page
+        page = await patient(() => prev.next())
+      }
+      return out
+    } catch (e) {
+      if (attempt >= restarts || !staleCursor(e)) throw e
+    }
   }
-  return out
 }
 
 /** Everything alive in the world (all kinds), optionally limited to a rectangle. */

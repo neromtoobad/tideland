@@ -148,6 +148,29 @@ and the extra reads.
 promise resolved a few seconds later. We drive the UI from the event, not the receipt. A pass that reaches the node after
 the fuse block fails as expected ("entity not found"), and the player sees "too late: it popped in your hands".
 
+## 10. A cursor is bound to a block, and blocks come every 2 s (18 Oct)
+
+**Surface:** `arkiv_query` pagination (`QueryResult.next()`), `@arkiv-network/sdk` 0.8.1.
+
+**Expected:** a multi-page read (our world is 316 entities, 2 pages of 200) either succeeds or fails in a way a simple
+retry fixes.
+
+**Actual:** the second page intermittently comes back as `QueryError: Query rejected (cursor, -32005): Request exceeds
+defined limit.` with `data.message` = *"cursor belongs to a different query, block or select — start a new
+page-through"*. Retrying `next()` with the same cursor (what our item 2b workaround did) cannot succeed once a new block
+has landed. From a fresh browser the failing page was also **held for ~10 s** before the rejection, so the first screen
+of the game waited 15+ s. It also killed our guild bots' CI runs whenever it coincided with a separate bot bug.
+
+**Steps to reproduce:** create ~250 entities under one query, then in a loop:
+`let p = await q.limit(200).fetch(); await new Promise(r => setTimeout(r, 2500)); await p.next()`. The `next()` rejects
+with the message above. Measured 18 Oct on our world query: `next()` immediately → 3 of 3 succeed; after 2.5 s or
+5 s → 3 of 3 rejected.
+
+**What would fix it:** have the SDK restart the page-through itself when it sees this error (it knows the query), or
+pin the cursor to the block of the first page so later pages are served from that snapshot. Give this case its own
+`QueryError` kind instead of the generic `-32005`. **Workaround:** [`collect()`](../shared/tideland.js) restarts the
+whole page-through on this message (and on a read timeout, now 8 s), up to three times.
+
 ---
 
 ## Tested paths that worked as documented
