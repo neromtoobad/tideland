@@ -188,7 +188,11 @@ async function read() {
     const counts = {}
     for (const e of live) counts[e.a.kind] = (counts[e.a.kind] || 0) + 1
     $("kinds").innerHTML = Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<tr><td><span class="tag">${esc(k)}</span></td><td>${n}</td></tr>`).join("")
-  } catch (e) { $("err").hidden = false; $("err").textContent = e.message }
+  } catch (e) {
+    $("err").hidden = false; $("err").textContent = e.message
+    // Opt-in only: our read-only relay (it forwards reads with our key). The page never uses it on its own.
+    if (/budget/.test(e.message) && !RPC.includes("/api/rpc")) $("err").insertAdjacentHTML("beforeend", ` Or <a href="https://tideland.nerom.site/reader.html?rpc=https://tideland.nerom.site/api/rpc">read through our read-only relay</a> (it can't write, and you can always come back to Arkiv directly).`)
+  }
 }
 
 async function lookup(address) {
