@@ -657,9 +657,10 @@ function frame(now) {
   { const q0 = new URLSearchParams(location.search)
     if (!q0.get("h") && !location.pathname.startsWith("/h/") && !house.myHome() && !["run", "explore", "play", "t", "x", "embed"].some((k) => q0.has(k))) house.home() }
   toast("Reading the island from Arkiv…", 0)
+  const slowNote = setTimeout(() => { if (!$("toast").hidden) toast(`Arkiv's testnet is answering slowly right now. Still reading the island… <a href="/reader.html" target="_blank" rel="noopener">or open the reader</a>`, 0) }, 12000)
   // the node sometimes turns away a burst of reads for a moment: try a few times before saying anything
   for (let i = 0; i < 4; i++) {
-    try { await refresh(); $("toast").hidden = true; break } catch (err) {
+    try { await refresh(); clearTimeout(slowNote); $("toast").hidden = true; break } catch (err) {
       if (i === 3) toast(`Could not reach Arkiv: ${esc(err.message)}`, 0)
       else await new Promise((r) => setTimeout(r, 2000 * (i + 1)))
     }

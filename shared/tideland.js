@@ -295,7 +295,8 @@ async function patient(fn, tries = 4) {
   for (let i = 0; ; i++) {
     try { return await fn() } catch (e) {
       // -32006 "ahead of the chain tip": a pinned page hit an RPC node a block behind the one that pinned it; wait a beat
-      if (i >= tries - 1 || staleCursor(e) || !/-32005|exceeds defined limit|-32006|ahead of the chain tip/i.test(`${e?.message ?? e} ${e?.data?.message ?? ""}`)) throw e
+      // a slow answer is retried as the same page: pages are pinned to one block, so their cursors stay valid
+      if (i >= tries - 1 || staleCursor(e) || !/-32005|exceeds defined limit|-32006|ahead of the chain tip|timed out|took too long/i.test(`${e?.shortMessage ?? ""} ${e?.message ?? e} ${e?.data?.message ?? ""}`)) throw e
       await pause(1200 * (i + 1))
     }
   }
@@ -305,8 +306,8 @@ async function patient(fn, tries = 4) {
  * was issued at and blocks come every 2 s, so an unpinned multi-page read goes stale halfway ("cursor belongs to a
  * different query, block or select — start a new page-through"). So a read that needs more than one page is re-run
  * pinned to the first page's block (`atBlock`), and every later page comes from that one snapshot. A hung or stale
- * read still starts over, as a safety net. */
-const staleCursor = (e) => /different query, block or select|new page-through|timed out|took too long/i.test(`${e?.data?.message ?? ""} ${e?.shortMessage ?? ""} ${e?.message ?? ""}`)
+ * read is retried page by page, and a stale cursor starts the page-through over. */
+const staleCursor = (e) => /different query, block or select|new page-through/i.test(`${e?.data?.message ?? ""} ${e?.shortMessage ?? ""} ${e?.message ?? ""}`)
 export async function collect(builder, restarts = 2) {
   for (let attempt = 0; ; attempt++) {
     try {
