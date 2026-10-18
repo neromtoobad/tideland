@@ -96,6 +96,41 @@ async function refreshNow() {
 }
 
 
+// ---------- live feed: Tideland's writes as they land, straight from the socket ----------
+// Events arrive for every app on the network, so only entities we can match to the island's own records are shown.
+const feed = []
+const gone = new Map() // key -> thing, remembered at deletion so a pop or an expiry can still be named
+const homeName = (key) => { const h = state.things.get(key); return h ? (h.data?.name || h.data?.islander || "a house") : "a house" }
+function feedLabel(ev) {
+  const t = state.things.get(ev.key) ?? gone.get(ev.key)
+  if (!t) return null
+  const k = t.kind, nm = t.data?.name || t.data?.islander
+  if (ev.type === "ExpiryExtended") return k === "home" ? `⛵ ${nm || "a house"} kept afloat` : t.attrs?.material && MATERIALS[t.attrs.material]?.commons ? `🔧 ${nm || t.attrs.material} patched` : `⏳ ${nm || k} renewed`
+  if (ev.type === "OwnershipTransferred") return k === "puffer" ? "🐡 the puffer was thrown" : k === "meal" ? `🍲 a meal handed to ${homeName(t.attrs?.home)}` : k === "parcel" ? `🤝 ${nm || "land"} changed hands` : null
+  if (ev.type !== "EntityCreated") return null
+  return ({
+    home: `🏠 ${t.data?.islander || "an islander"} moved in`, tend: `⛵ ${homeName(t.attrs?.home)} kept afloat`, visit: `🤝 a visit to ${homeName(t.attrs?.home)}`,
+    meal: `🎣 a meal for ${homeName(t.attrs?.home)}`, sign: `✍️ signed ${homeName(t.attrs?.home)}'s book`, sleep: "😴 an islander went to bed",
+    say: `💬 “${String(t.data?.text ?? "").slice(0, 40)}”`, seat: "🪑 someone sat at a Puffer Pass table", table: "🐡 a Puffer Pass table opened",
+    pass: "🐡 the puffer was thrown", pop: `💥 the puffer popped on ${homeName(t.attrs?.home)}`, win: `🏆 ${homeName(t.attrs?.home)} won Puffer Pass`,
+    structure: `🔨 ${nm || t.attrs?.material || "something"} built`, parcel: null, run: "🌩️ a storm shift was sealed", inscription: "🪨 words carved on the land", guild: "🏳️ a guild was founded",
+  })[k] ?? null
+}
+function onFeed(e) {
+  if (!["EntityCreated", "ExpiryExtended", "OwnershipTransferred"].includes(e.type)) return
+  feed.unshift({ type: e.type, key: e.entityKey, tx: e.transactionHash, at: Date.now() })
+  feed.length = Math.min(feed.length, 80)
+  renderFeed()
+}
+function renderFeed() {
+  const rows = []
+  for (const ev of feed) { const label = feedLabel(ev); if (label && !rows.some((r) => r.tx === ev.tx && r.label === label)) rows.push({ ...ev, label }); if (rows.length >= 5) break }
+  const box = $("livefeed")
+  box.hidden = !rows.length || !document.body.classList.contains("focus")
+  $("lf-list").innerHTML = rows.map((r) => `<li><span>${esc(r.label)}</span><a href="${EXPLORER}/tx/${r.tx}" target="_blank" rel="noopener" title="See the transaction">${Math.max(1, Math.round((Date.now() - r.at) / 1000))} s ago ↗</a></li>`).join("")
+}
+setInterval(renderFeed, 5000)
+
 function watchLive() {
   // A real socket: WebSocket transport and no fromBlock, so events are pushed rather than polled.
   const ws = publicClient({ ws: true })
@@ -110,7 +145,7 @@ function watchLive() {
     pending = setTimeout(() => (walk?.active ? refreshLive() : refresh()).catch(() => {}), walk?.active ? 900 : 2500)
   }
   ws.watchEntityEvents({
-    onEvent: (e) => puffer.onEvent(e),
+    onEvent: (e) => { puffer.onEvent(e); onFeed(e) },
     onEntityCreated: (e) => { touch(e); house.onCreated() },
     onExpiryExtended: async (e) => {
       runner.onExtended(e.entityKey, e.expiresAt) // the event carries the new expiry: apply it directly
@@ -125,7 +160,7 @@ function watchLive() {
       } catch { ripple(e.entityKey, "renewed") }
     },
     onOwnershipTransferred: (e) => { touch(e); house.onCreated() }, onEntityPatched: touch,
-    onEntityDeleted: (e) => { state.things.delete(e.entityKey); rebuild(); touch() },
+    onEntityDeleted: (e) => { const t = state.things.get(e.entityKey); if (t) gone.set(e.entityKey, t); state.things.delete(e.entityKey); rebuild(); touch() },
     onError: (err) => console.warn("watch", err.message),
   })
 }

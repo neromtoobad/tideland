@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tideland reader · no backend</title>
+<meta name="description" content="Tideland, read straight from Arkiv. One HTML file: no build, no server, no Tideland code. Save it and open it from disk." />
+<!--
+  Tideland reader. This single file is a complete, independent client for the Tideland world.
+  It talks to the Arkiv Tiramisu RPC directly with plain JSON-RPC (arkiv_query, eth_blockNumber) and uses nothing
+  from Tideland: no SDK, no build step, no API of ours. Save it anywhere and open it in a browser, even from disk.
+  If tideland.nerom.site disappeared tonight, this file would still show the whole island.
+  Data contract: https://github.com/neromtoobad/tideland/blob/main/arkiv/schema.md · MIT
+-->
+<style>
+  :root { --paper:#f4ead6; --card:#fffdf6; --ink:#1b2b2a; --muted:#5e7472; --line:#e3d6b8; --teal:#1f6e68; --rust:#b4552e; --gold:#96762b; }
+  * { box-sizing:border-box; }
+  [hidden] { display:none !important; }
+  body { margin:0; background:var(--paper); color:var(--ink); font:15px/1.5 "Albert Sans",system-ui,-apple-system,sans-serif; }
+  main { max-width:1100px; margin:0 auto; padding:28px 16px 60px; }
+  h1 { font:400 46px/1.05 "Instrument Serif",Georgia,serif; margin:0; letter-spacing:-.01em; }
+  h1 em { color:var(--teal); }
+  h2 { font:400 28px/1.1 "Instrument Serif",Georgia,serif; margin:0 0 4px; }
+  .lede { color:var(--muted); max-width:70ch; margin:10px 0 0; }
+  .bar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:18px 0 24px; }
+  .pill { font:600 12px "IBM Plex Mono",ui-monospace,monospace; background:var(--card); border:1px solid var(--line); border-radius:99px; padding:6px 12px; }
+  .pill b { color:var(--teal); }
+  button { font:600 14px inherit; font-family:inherit; border:0; border-radius:99px; padding:9px 16px; background:var(--teal); color:#fff; cursor:pointer; }
+  button.ghost { background:var(--card); color:var(--ink); border:1px solid var(--line); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px; }
+  section.card { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:18px; }
+  code, .q { font:12px/1.5 "IBM Plex Mono",ui-monospace,monospace; }
+  .q { display:block; color:var(--muted); background:#f7f0e0; border-radius:10px; padding:8px 10px; margin:6px 0 12px; overflow-wrap:anywhere; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  td, th { text-align:left; padding:7px 4px; border-top:1px solid #efe5cf; vertical-align:top; }
+  th { font:600 11px "IBM Plex Mono",monospace; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); border-top:0; }
+  .soon { color:var(--rust); font-weight:600; }
+  .mono { font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px; }
+  a { color:var(--teal); }
+  .muted { color:var(--muted); }
+  .err { background:#f8e1d6; color:var(--rust); border-radius:12px; padding:10px 14px; margin:12px 0; }
+  form { display:flex; gap:8px; margin:8px 0 10px; }
+  input { flex:1; font:13px "IBM Plex Mono",monospace; padding:9px 12px; border:1px solid var(--line); border-radius:10px; background:#fff; min-width:0; }
+  .tag { display:inline-block; font:600 11px "IBM Plex Mono",monospace; background:#e6f2f1; color:var(--teal); padding:1px 7px; border-radius:6px; }
+  footer { margin-top:28px; color:var(--muted); font-size:13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Tideland, <em>read without Tideland</em></h1>
+  <p class="lede">This page is one HTML file with no build, no server and no Tideland code. It asks the Arkiv network for the
+    island directly, over plain JSON-RPC, and draws it as a list. Save it (<code>File → Save</code>) and open it from your disk:
+    it still works. If tideland.nerom.site went away tonight, the island would still be here.</p>
+  <div class="bar">
+    <span class="pill">network <b>Arkiv Tiramisu</b></span>
+    <span class="pill">RPC <b id="rpcHost">…</b></span>
+    <span class="pill">head block <b id="head">…</b></span>
+    <span class="pill">entities <b id="count">…</b></span>
+    <span class="pill">read at block <b id="at">…</b></span>
+    <button id="reload">Read again</button>
+    <button class="ghost" id="keyBtn">Use my API key</button>
+  </div>
+  <div class="err" id="err" hidden></div>
+
+  <div class="grid">
+    <section class="card">
+      <h2>Whose house sinks next</h2>
+      <span class="q" id="q-homes"></span>
+      <table><thead><tr><th>Islander · house</th><th>Sinks in</th><th>Kept afloat by</th></tr></thead><tbody id="homes"></tbody></table>
+    </section>
+    <section class="card">
+      <h2>The tide map</h2>
+      <span class="q" id="q-tide"></span>
+      <table><thead><tr><th>What</th><th>Where</th><th>Sinks in</th></tr></thead><tbody id="tide"></tbody></table>
+    </section>
+    <section class="card">
+      <h2>Puffer Pass winners</h2>
+      <span class="q">kind = str('win') · each one written in the same transaction as the winner's payout</span>
+      <table><thead><tr><th>Winner's house</th><th>Pot</th><th>Signed by</th></tr></thead><tbody id="wins"></tbody></table>
+    </section>
+    <section class="card">
+      <h2>Guestbooks</h2>
+      <span class="q">kind = str('sign') · a house levels up with distinct signers ($creator), which nobody can fake</span>
+      <table><thead><tr><th>House</th><th>Distinct signers</th><th>Level earned</th></tr></thead><tbody id="signs"></tbody></table>
+    </section>
+    <section class="card">
+      <h2>Look anyone up</h2>
+      <p class="muted" style="margin:0">Everything an address built (<code>$creator</code>, forever) and holds (<code>$owner</code>), straight from Arkiv.</p>
+      <form id="who"><input id="addr" placeholder="0x… address" autocomplete="off" /><button>Look up</button></form>
+      <span class="q" id="q-who"></span>
+      <div id="whoOut" class="muted">Try a guild bot: <a href="#" data-addr="0x498307005DEe719Fb85Cb9A891bae8242d89c172">Tidewrights founder</a></div>
+    </section>
+    <section class="card">
+      <h2>What's on the island</h2>
+      <span class="q" id="q-all"></span>
+      <table><tbody id="kinds"></tbody></table>
+    </section>
+  </div>
+  <footer>Data contract: <a href="https://github.com/neromtoobad/tideland/blob/main/arkiv/schema.md">arkiv/schema.md</a> ·
+    source: <a href="https://github.com/neromtoobad/tideland">github.com/neromtoobad/tideland</a> (MIT) · the game: <a href="https://tideland.nerom.site">tideland.nerom.site</a></footer>
+</main>
+<script>
+// Any Arkiv RPC works: add ?rpc=<url> to read through your own node or a mirror.
+const RPC = new URLSearchParams(location.search).get("rpc") || "https://rpc.tiramisu.db-chain.testnet.arkiv.network"
+const EXPLORER = "https://tiramisu.explorer.arkiv.network"
+const SELECT = { key: true, owner: true, creator: true, createdAt: true, expiresAt: true, attributes: true, payload: true }
+const BASE = "app = str('tideland') AND world = str('s1')"
+const $ = (id) => document.getElementById(id)
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c])
+const short = (a) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "")
+let apiKey = null
+try { apiKey = localStorage.getItem("tideland.reader.key") } catch {}
+
+async function rpc(method, params) {
+  const r = await fetch(RPC, { method: "POST", headers: { "content-type": "application/json", ...(apiKey ? { "X-API-KEY": apiKey } : {}) }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) })
+  if (r.status === 429) throw new Error("Arkiv's anonymous read budget for your network is used up for a few minutes. Wait and press Read again, or add a free API key from hub.arkiv.network.")
+  const body = await r.json()
+  if (body.error) throw new Error(`${body.error.message} ${body.error.data?.message ?? ""}`)
+  return body.result
+}
+const decode = (hex) => { try { return JSON.parse(new TextDecoder().decode(Uint8Array.from(hex.slice(2).match(/../g) ?? [], (b) => parseInt(b, 16)))) } catch { return {} } }
+// Every page of a query, all read at one block: a cursor goes stale after a block (2 s), so pin with atBlock.
+async function query(q) {
+  const opts = { select: SELECT, limit: "0xc8" }
+  let page = await rpc("arkiv_query", [q, opts])
+  const atBlock = page.blockNumber
+  if (page.cursor) page = await rpc("arkiv_query", [q, { ...opts, atBlock }])
+  const out = []
+  for (;;) {
+    for (const e of page.data) out.push({ ...e, expiresAt: BigInt(e.expiresAt), createdAt: BigInt(e.createdAt ?? 0), a: Object.fromEntries(e.attributes.map((x) => [x.name, x.value])), data: decode(e.payload ?? "0x") })
+    if (!page.cursor) return { out, atBlock: BigInt(atBlock) }
+    page = await rpc("arkiv_query", [q, { ...opts, atBlock, cursor: page.cursor }])
+  }
+}
+
+let head = 0n
+const left = (block) => {
+  const s = Number(block - head) * 2
+  if (s <= 0) return "gone"
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), d = Math.floor(h / 24)
+  return d >= 2 ? `${d} d` : h ? `${h} h ${m} m` : `${m} m`
+}
+const link = (key, text) => `<a href="${EXPLORER}/entity/${key}" target="_blank" rel="noopener">${esc(text)}</a>`
+const LEVELS = [["driftwood", 0], ["pine", 3], ["stone", 6], ["lighthouse", 10]]
+
+async function read() {
+  $("err").hidden = true
+  $("rpcHost").textContent = new URL(RPC, location.href).host
+  try {
+    head = BigInt(await rpc("eth_blockNumber", []))
+    $("head").textContent = head.toLocaleString()
+    $("q-all").textContent = BASE
+    const { out: all, atBlock } = await query(BASE)
+    $("at").textContent = atBlock.toLocaleString()
+    const live = all.filter((e) => e.expiresAt > head)
+    $("count").textContent = live.length
+    const by = (k) => live.filter((e) => e.a.kind === k)
+    const homes = new Map(by("home").map((h) => [h.key, h]))
+
+    // homes, soonest to sink, with who kept them afloat (tend records' $creator, minus the owner)
+    $("q-homes").textContent = `${BASE} AND kind = str('home')   ·   kept afloat by: kind = str('tend') AND home = key(<home>)`
+    const tends = by("tend")
+    $("homes").innerHTML = [...homes.values()].sort((a, b) => (a.expiresAt < b.expiresAt ? -1 : 1)).map((h) => {
+      const keepers = [...new Set(tends.filter((t) => t.a.home === h.key && t.creator !== h.owner).map((t) => t.creator))]
+      const s = Number(h.expiresAt - head) * 2
+      return `<tr><td>${link(h.key, h.data.islander || "Islander")} <span class="muted">· ${esc(h.data.name || "")}</span><br><span class="tag">${esc(h.a.style)}</span> <span class="mono muted">owner ${short(h.owner)}</span></td>
+        <td class="${s < 6 * 3600 ? "soon" : ""}">${left(h.expiresAt)}</td>
+        <td class="mono">${keepers.length ? keepers.slice(0, 4).map(short).join("<br>") + (keepers.length > 4 ? `<br>+${keepers.length - 4} more` : "") : "<span class='muted'>nobody yet</span>"}</td></tr>`
+    }).join("") || `<tr><td colspan="3" class="muted">No homes standing.</td></tr>`
+
+    // the tide map: what sinks within 24 h (a range query on the system attribute $expiresAt)
+    $("q-tide").textContent = `${BASE} AND $expiresAt < u64(${(head + 43200n).toString()})`
+    const tide = live.filter((e) => e.expiresAt < head + 43200n && ["structure", "home", "parcel"].includes(e.a.kind)).sort((a, b) => (a.expiresAt < b.expiresAt ? -1 : 1)).slice(0, 14)
+    $("tide").innerHTML = tide.map((e) => `<tr><td>${link(e.key, e.data.name || e.data.islander || e.a.kind)} <span class="tag">${esc(e.a.material || e.a.style || e.a.kind)}</span></td><td class="mono">${e.a.x ?? "–"},${e.a.y ?? "–"}</td><td class="soon">${left(e.expiresAt)}</td></tr>`).join("") || `<tr><td colspan="3" class="muted">Nothing sinks in the next day.</td></tr>`
+
+    // Puffer Pass winners
+    const wins = by("win").sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+    $("wins").innerHTML = wins.map((w) => { const h = homes.get(w.a.home); return `<tr><td>${link(w.key, h ? `${h.data.islander || "Islander"} · ${h.data.name || ""}` : short(w.a.home))}</td><td>${(Number(w.a.minutes) / 60).toFixed(1)} h of ${(Number(w.a.pot) / 60).toFixed(0)} h</td><td class="mono">${short(w.creator)}</td></tr>` }).join("") || `<tr><td colspan="3" class="muted">No wins in the last 30 days.</td></tr>`
+
+    // guestbooks: distinct $creator of sign records, minus the owner
+    const signs = by("sign")
+    $("signs").innerHTML = [...homes.values()].map((h) => {
+      const n = new Set(signs.filter((s) => s.a.home === h.key && s.creator !== h.owner).map((s) => s.creator)).size
+      const earned = LEVELS.filter(([, need]) => n >= need).pop()[0]
+      return { h, n, earned }
+    }).sort((a, b) => b.n - a.n).map(({ h, n, earned }) => `<tr><td>${link(h.key, `${h.data.islander || "Islander"} · ${h.data.name || ""}`)}</td><td>${n}</td><td><span class="tag">${earned}</span>${earned !== h.a.style ? ` <span class="muted">(claims ${esc(h.a.style)})</span>` : ""}</td></tr>`).join("")
+
+    const counts = {}
+    for (const e of live) counts[e.a.kind] = (counts[e.a.kind] || 0) + 1
+    $("kinds").innerHTML = Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<tr><td><span class="tag">${esc(k)}</span></td><td>${n}</td></tr>`).join("")
+  } catch (e) { $("err").hidden = false; $("err").textContent = e.message }
+}
+
+async function lookup(address) {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) { $("whoOut").textContent = "That isn't an address."; return }
+  $("addr").value = address
+  $("q-who").textContent = `${BASE} AND $creator = addr(${address})   ·   ${BASE} AND $owner = addr(${address})`
+  $("whoOut").textContent = "Reading…"
+  try {
+    const built = (await query(`${BASE} AND $creator = addr(${address})`)).out.filter((e) => e.expiresAt > head)
+    const held = (await query(`${BASE} AND $owner = addr(${address})`)).out.filter((e) => e.expiresAt > head)
+    const tally = (xs) => Object.entries(xs.reduce((m, e) => ((m[e.a.kind] = (m[e.a.kind] || 0) + 1), m), {})).map(([k, n]) => `${n} ${k}`).join(" · ") || "nothing"
+    $("whoOut").innerHTML = `<p style="margin:4px 0"><b>Built (forever theirs):</b> ${esc(tally(built))}</p><p style="margin:4px 0"><b>Holds now:</b> ${esc(tally(held))}</p><p class="muted" style="margin:4px 0">Explorer: <a href="${EXPLORER}/address/${address}" target="_blank" rel="noopener">${short(address)}</a></p>`
+  } catch (e) { $("whoOut").textContent = e.message }
+}
+
+$("reload").onclick = read
+$("who").onsubmit = (e) => { e.preventDefault(); lookup($("addr").value.trim()) }
+$("whoOut").onclick = (e) => { const a = e.target.closest("[data-addr]"); if (a) { e.preventDefault(); lookup(a.dataset.addr) } }
+$("keyBtn").onclick = () => {
+  const k = prompt("Paste a free Arkiv API key from hub.arkiv.network (kept only in this browser):", apiKey || "")
+  if (k === null) return
+  apiKey = k.trim() || null
+  try { apiKey ? localStorage.setItem("tideland.reader.key", apiKey) : localStorage.removeItem("tideland.reader.key") } catch {}
+  read()
+}
+read()
+</script>
+</body>
+</html>

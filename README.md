@@ -19,7 +19,8 @@ Your house only lives as long as other people keep it afloat, which is exactly w
 - **Network:** Arkiv Tiramisu testnet (chain `7738577`), `@arkiv-network/sdk` 0.8.1
 - **Tracks:** Censorship Resistance · Open Source
 - **Demo video (2:44):** <!-- VIDEO: paste the YouTube link here --> see the Devfolio submission
-- **Build on it without asking:** [`examples/raw-consumer.mjs`](examples/raw-consumer.mjs), a client in plain JSON-RPC, no SDK, no install
+- **Read it without us:** [tideland.nerom.site/reader.html](https://tideland.nerom.site/reader.html), one HTML file with no build and no backend. Save it and open it from disk; add `?rpc=<url>` to read through any Arkiv node. Source: [`web/public/reader.html`](web/public/reader.html)
+- **Build on it without asking:** [`examples/raw-consumer.mjs`](examples/raw-consumer.mjs), a client in plain JSON-RPC, no SDK, no install; [`examples/keeper.mjs`](examples/keeper.mjs), a stranger's bot that keeps houses afloat with its own key
 - **Tests:** `npm test` (the Puffer Pass rules as a pure function, including the cheats every client must ignore)
 - Built for *Arkiv: Global Tour Stop* (9–18 Oct 2026). Tideland won 1st place in the Arkiv Ideathon (Aug 2026) as an idea and data model; this repo is the first real build.
 
@@ -37,10 +38,13 @@ stops paying for it, everything players built is gone, and nobody else is allowe
 
 **What changes with Tideland, from day one.** Nothing of the world lives on our side. If we stopped paying for
 tideland.nerom.site tonight:
-- every house, guestbook signature, win and storm patch can still be read and queried from Arkiv by anyone: with
-  [`cli/tide.mjs`](cli/tide.mjs), with the [raw consumer](examples/raw-consumer.mjs), or with the curl below;
+- every house, guestbook signature, win and storm patch can still be read and queried from Arkiv by anyone: with the
+  standalone [reader page](web/public/reader.html) (one HTML file: save it, open it from disk, point it at any Arkiv
+  RPC with `?rpc=`), [`cli/tide.mjs`](cli/tide.mjs), the [raw consumer](examples/raw-consumer.mjs), or the curl below;
 - houses keep living as long as *other players* keep them afloat. Their lifetimes are enforced by the network, and
-  `permissionlessExtension` means no one needs our permission (or our keys) to extend them;
+  `permissionlessExtension` means no one needs our permission (or our keys) to extend them. Proof: a stranger's key with
+  nothing from us but this repo ran [`examples/keeper.mjs`](examples/keeper.mjs) and kept Kemi's house afloat:
+  [`0xafafed24…`](https://tiramisu.explorer.arkiv.network/tx/0xafafed241a61488ee738b05c05e0e40731922f82d09181851a7a15636f2cb18d);
 - anyone can host the web client (`npm run build`, static files), run the bots, or write a new client. The rules are pure
   functions of public records ([`resolveTable()`](shared/tideland.js), with [tests](test/rules.test.mjs)), not server logic.
 
@@ -97,7 +101,7 @@ there: every client recomputes them from the table's public records.
 | **Batch + predicted keys** | Claiming land and building on it is one atomic transaction. The house references its parcel's key before that key exists. | [`claimAndBuild()`](shared/tideland.js) |
 | **Range queries on numeric attributes** | `x`/`y` are `i32`, so drawing a region is a range query. | [`worldQuery()`](shared/tideland.js) |
 | **Query on `$expiresAt`** | The tide map, "what sinks in the next day", is one range query on the system expiry. | [`tideQuery()`](shared/tideland.js) |
-| **WebSocket entity events** | Builds, renewals and transfers appear on every open screen without a refresh. | [`watchLive()`](web/src/main.js) |
+| **WebSocket entity events** | Builds, renewals and transfers appear on every open screen without a refresh. A "Live on Arkiv" strip lists Tideland's writes as they land (throws, saves, pops, wins), each with its transaction. | [`watchLive()` / `onFeed()`](web/src/main.js) |
 | **Cursor pagination** | Every query walks all pages (`hasNextPage`/`next`). | [`collect()`](shared/tideland.js) |
 
 ## Build on it (Open Source)
@@ -114,8 +118,11 @@ dataset, and you need nobody's permission to use it:
 - **The rules, importable:** [`shared/tideland.js`](shared/tideland.js) is one ES module (queries, writes,
   `resolveTable`) used by our web client, CLI and bots alike. Import it to write a bot, a map, a leaderboard or a
   rival game on the same island.
-- **Write your own bot:** our nine guild bots ([`scripts/bots.mjs`](scripts/bots.mjs)) are ordinary players with their
-  own keys, running in public CI. Yours can sit at a Puffer Pass table, tend houses or found a guild the same way.
+- **Write your own bot:** start from [`examples/keeper.mjs`](examples/keeper.mjs) (about 60 lines). It makes its own
+  key, finds the house that sinks soonest, skips houses flooded by a Puffer Pass pop as the rules ask, and adds an hour
+  of life with a signed `tend`, so every client shows *your* address under "kept afloat by". Try
+  `node examples/keeper.mjs --dry` first. Our nine guild bots ([`scripts/bots.mjs`](scripts/bots.mjs)) work the same
+  way, in public CI.
 - **Stability promise:** through judging and beyond, `world = "s1"` keeps its attribute names and meanings. New
   attributes are only added; anything breaking moves to `world = "s2"`, so `s1` readers never break.
 
@@ -131,6 +138,10 @@ curl -s $RPC -H 'content-type: application/json' -d "{\"jsonrpc\":\"2.0\",\"id\"
 
 If the anonymous budget is used up (HTTP 429 `ANON_COST_LIMITED`), wait for the window to reset or add
 `-H "X-API-KEY: <your key from hub.arkiv.network>"` (see [friction #1](arkiv/friction.md)).
+
+**Fastest, in a browser: open the reader.** https://tideland.nerom.site/reader.html: homes and who kept them afloat, the tide map, Puffer
+Pass winners, guestbook levels checked against real signers, and an address lookup by `$creator`/`$owner`. It's one file
+that talks to Arkiv directly, so you can also save it and open it from disk.
 
 **1. Read the world without our site** (no wallet needed):
 
@@ -215,7 +226,8 @@ arkiv/friction.md    what got in the way, with versions and repro steps
 shared/tideland.js   the contract in code, shared by every client
 web/                 the web client (Vite, canvas, no framework)
 cli/tide.mjs         a second, independent client
-examples/            a third client in raw JSON-RPC, no SDK (build on it)
+examples/            a third client in raw JSON-RPC (no SDK) and a stranger's keeper bot
+web/public/reader.html  a fourth client: one HTML file, no build, no backend
 test/                the Puffer Pass rules, tested as a pure function (npm test)
 scripts/bots.mjs     the founding guilds
 api/                 drip (test GLM) and read-only relay; no world logic

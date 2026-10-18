@@ -10,11 +10,11 @@ Tiramisu testnet, public RPC `https://rpc.tiramisu.db-chain.testnet.arkiv.networ
 
 | # | Issue | Impact on Tideland | Status |
 |---|---|---|---|
-| 1 | 429 + long `Retry-After` is silently slept through by the default transport | The game froze for minutes; looked like an outage | Worked around (`retryCount: 0`, relay) |
-| 10 | `next()` goes stale after one 2-s block unless the query is pinned with `.atBlock()` | 15 s blank first screen; failed bot runs | Fixed by pinning |
+| 1 | 429 + long `Retry-After` is silently slept through by the default transport ([#126](https://github.com/Arkiv-Network/arkiv-sdk-js/issues/126)) | The game froze for minutes; looked like an outage | Worked around (`retryCount: 0`, relay) |
+| 10 | `next()` goes stale after one 2-s block unless the query is pinned with `.atBlock()` ([#125](https://github.com/Arkiv-Network/arkiv-sdk-js/issues/125)) | 15 s blank first screen; failed bot runs | Fixed by pinning |
 | 2 | Query cost (100 units flat, 10,000 anonymous window) is undocumented and hidden | Our first client burned a visitor's budget in under an hour | Worked around (one debounced re-read) |
 | 7 | `readonly` doesn't freeze expiry | The puffer's holder could have extended the fuse | Worked around (`fuse` attribute) |
-| 4 | `ExpiryExtended` names the owner, not the extender | One extra `getTransaction` per event to show who tended | Worked around |
+| 4 | `ExpiryExtended` names the owner, not the extender ([#127](https://github.com/Arkiv-Network/arkiv-sdk-js/issues/127)) | One extra `getTransaction` per event to show who tended | Worked around |
 | 8 | No event when an entity expires | Every client estimates "it popped" from the head block | Worked around |
 | 3 | `predictEntityKeys` missing on the wallet client | Confusing, cheap | Worked around |
 | 5, 6 | Faucet pays only the signed-in wallet; stale README snippets | Minor | Noted |
@@ -26,6 +26,8 @@ for budget/rate limits (429, `ANON_COST_LIMITED`) and for stale cursors, a defau
 ---
 
 ## 1. An exhausted anonymous budget looks like a 27-minute hang, not an error
+
+**Filed upstream:** [arkiv-sdk-js#126](https://github.com/Arkiv-Network/arkiv-sdk-js/issues/126)
 
 **Surface:** public RPC rate limiting + SDK default transport (`http()` from viem).
 
@@ -96,6 +98,8 @@ item 10. Retrying the same cursor was the wrong fix; pinning the query with `.at
 
 ## 3. `predictEntityKeys` is not on the wallet client
 
+**Filed upstream** by another team: [arkiv-sdk-js#123](https://github.com/Arkiv-Network/arkiv-sdk-js/issues/123) (we hit the same thing independently)
+
 **Surface:** `createWalletClient` actions.
 
 **Expected:** the wallet client's JSDoc says it offers mutations "on top of the read actions a Public Client has", so
@@ -110,6 +114,8 @@ item 10. Retrying the same cursor was the wrong fix; pinning the query with `.at
 knows the owner), or correct the wallet client's docstring. **Workaround:** predict with a public client.
 
 ## 4. `ExpiryExtended` does not say who extended
+
+**Filed upstream:** [arkiv-sdk-js#127](https://github.com/Arkiv-Network/arkiv-sdk-js/issues/127)
 
 **Surface:** `watchEntityEvents` / `ExpiryExtendedEvent`.
 
@@ -169,6 +175,8 @@ promise resolved a few seconds later. We drive the UI from the event, not the re
 the fuse block fails as expected ("entity not found"), and the player sees "too late: it popped in your hands".
 
 ## 10. `next()` goes stale after one block unless you pin the query yourself (18 Oct)
+
+**Filed upstream:** [arkiv-sdk-js#125](https://github.com/Arkiv-Network/arkiv-sdk-js/issues/125)
 
 **Surface:** `arkiv_query` pagination (`QueryResult.next()`, `SelectQueryBuilder.atBlock()`), `@arkiv-network/sdk` 0.8.1.
 

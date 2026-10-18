@@ -6,3 +6,4 @@ dist
 .vercel
 art/raw
 .env*
+.keeper.key
