@@ -576,8 +576,8 @@ function frame(now) {
 }
 
 ;(async () => {
-  await loadSprites()
-  requestAnimationFrame(frame)
+  // sprites download while the first reads run; the island starts drawing as soon as they're in
+  loadSprites().then(() => requestAnimationFrame(frame))
   try { if (localStorage.getItem("tideland.mode") === "local") state.wallet = localWallet() } catch {}
   renderWallet(); updateBalance()
   toast("Reading the island from Arkiv…", 0)
