@@ -108,7 +108,7 @@ export function draw(view, world) {
   }
 
   // figures: every islander, whether pottering by their home or walking about, depth-sorted with the world
-  const figures = zoom >= 0.45 && !run ? collectFigures(view, world, scene, head, t) : []
+  const figures = zoom >= 0.2 && !run ? collectFigures(view, world, scene, head, t) : []
   figures.sort((p, q) => p.depth - q.depth)
   let fi = 0
 
