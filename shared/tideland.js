@@ -262,7 +262,7 @@ const envKey = () => globalThis.process?.env?.ARKIV_ACCESS_KEY || undefined
  * (ANON_COST_LIMITED), and viem's default retry-with-backoff turns that into a silent ~40 s hang.
  */
 function transport({ rpc = RPC_URL, apiKey = envKey() } = {}) {
-  return http(rpc, { retryCount: 0, timeout: 8_000, fetchOptions: apiKey ? { headers: { "X-API-KEY": apiKey } } : undefined })
+  return http(rpc, { retryCount: 0, timeout: 20_000, fetchOptions: apiKey ? { headers: { "X-API-KEY": apiKey } } : undefined })
 }
 
 export function publicClient({ ws = false, rpc, apiKey } = {}) {
@@ -291,10 +291,11 @@ const FIELDS = { key: true, owner: true, creator: true, createdAt: true, expires
 
 const pause = (ms) => new Promise((r) => setTimeout(r, ms))
 /** Retries a read that the node turned away for a moment (JSON-RPC -32005 "Request exceeds defined limit"). */
-async function patient(fn, tries = 3) {
+async function patient(fn, tries = 4) {
   for (let i = 0; ; i++) {
     try { return await fn() } catch (e) {
-      if (i >= tries - 1 || staleCursor(e) || !/-32005|exceeds defined limit/i.test(String(e?.message ?? e))) throw e
+      // -32006 "ahead of the chain tip": a pinned page hit an RPC node a block behind the one that pinned it; wait a beat
+      if (i >= tries - 1 || staleCursor(e) || !/-32005|exceeds defined limit|-32006|ahead of the chain tip/i.test(`${e?.message ?? e} ${e?.data?.message ?? ""}`)) throw e
       await pause(1200 * (i + 1))
     }
   }

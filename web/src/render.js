@@ -32,9 +32,11 @@ export function createView(canvas) {
     canvas.width = Math.floor(innerWidth * view.dpr)
     canvas.height = Math.floor(innerHeight * view.dpr)
   }
+  // the zoom at which the whole island fits the window
+  view.fitZoom = () => Math.min(innerWidth / (SIZE * TW * 1.05), innerHeight / (SIZE * TH * 1.25), 1.4)
   view.fit = () => {
-    const w = SIZE * TW, h = SIZE * TH
-    view.zoom = Math.min(innerWidth / (w * 1.05), innerHeight / (h * 1.25), 1.4)
+    const h = SIZE * TH
+    view.zoom = view.fitZoom()
     view.ox = innerWidth / 2
     view.oy = innerHeight / 2 - (h * view.zoom) / 2 + 20
   }
@@ -323,7 +325,8 @@ function drawRunLayer(view, world, run, head, w, h, t, now) {
 // ---------------- Play mode: islanders walking about ----------------
 
 function followMe(view, me) {
-  const zt = innerWidth < 760 ? 1.3 : 1.75
+  // the camera follows you; how close it sits is yours to choose (wheel, pinch, + / − buttons)
+  const zt = view.userZoom ?? (innerWidth < 760 ? 1.3 : 1.75)
   view.zoom += (zt - view.zoom) * 0.05
   const tx = innerWidth / 2 - (me.pos.x - me.pos.y) * (TW / 2) * view.zoom
   const ty = innerHeight * 0.58 - (me.pos.x + me.pos.y) * (TH / 2) * view.zoom

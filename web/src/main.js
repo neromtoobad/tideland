@@ -84,7 +84,9 @@ async function refreshNow() {
   $("stat-block").textContent = state.head.toLocaleString()
   // one after the other: the node turns away bursts of parallel paging
   let things = await collect(worldQuery(pub))
-  let tide = await collect(tideQuery(pub, state.head))
+  // the tide map is a subset of the world we just read: `$expiresAt < head + 1 day`, filtered here instead of a second query
+  // (the same predicate `tideQuery` sends; cli/tide.mjs and the reader run it on the node)
+  let tide = things.filter((t) => t.expiresAt < state.head + DAY_BLOCKS)
   if (import.meta.env.DEV && new URLSearchParams(location.search).has("mock")) {
     things = (await import("./dev/mock.js")).mockThings(state.head)
     tide = things.filter((t) => t.expiresAt < state.head + DAY_BLOCKS)
@@ -586,14 +588,50 @@ canvas.addEventListener("pointerup", (e) => {
   if (drag && !drag.moved) select(view.toGrid(e.clientX, e.clientY))
   drag = null
 })
-canvas.addEventListener("wheel", (e) => { e.preventDefault(); zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0015)) }, { passive: false })
+canvas.addEventListener("wheel", (e) => { e.preventDefault(); zoomBy(Math.exp(-e.deltaY * 0.0015), e.clientX, e.clientY) }, { passive: false })
+// Out far enough to see the whole island on any screen (a phone needs ~0.12), in close enough to read faces.
+const zoomRange = () => [Math.min(0.25, view.fitZoom() * 0.8), 3]
+const clampZoom = (z) => { const [lo, hi] = zoomRange(); return Math.min(hi, Math.max(lo, z)) }
+const walking = () => walk?.active && document.body.classList.contains("play")
 function zoomAt(px, py, f) {
-  const z = Math.min(3, Math.max(0.25, view.zoom * f)), k = z / view.zoom
+  const z = clampZoom(view.zoom * f), k = z / view.zoom
   view.ox = px - (px - view.ox) * k; view.oy = py - (py - view.oy) * k; view.zoom = z
 }
-$("zoom-in").onclick = () => zoomAt(innerWidth / 2, innerHeight / 2, 1.25)
-$("zoom-out").onclick = () => zoomAt(innerWidth / 2, innerHeight / 2, 0.8)
-$("zoom-fit").onclick = () => view.fit()
+// While walking the camera follows you, so zoom sets how close it follows rather than moving the map.
+function zoomBy(f, px = innerWidth / 2, py = innerHeight / 2) {
+  if (runner.active) return
+  if (walking()) view.userZoom = clampZoom((view.userZoom ?? view.zoom) * f)
+  else zoomAt(px, py, f)
+}
+$("zoom-in").onclick = () => zoomBy(1.25)
+$("zoom-out").onclick = () => zoomBy(0.8)
+$("zoom-fit").onclick = () => {
+  if (!walking()) return view.fit()
+  // walking: toggle between the whole island and the usual close-up
+  view.userZoom = view.userZoom && view.userZoom <= view.fitZoom() * 1.05 ? undefined : view.fitZoom()
+}
+addEventListener("keydown", (e) => {
+  if (e.target.closest?.("input, textarea") || e.metaKey || e.ctrlKey) return
+  if (e.key === "+" || e.key === "=") zoomBy(1.2)
+  else if (e.key === "-" || e.key === "_") zoomBy(1 / 1.2)
+})
+// Pinch to zoom on touch screens (two fingers on the map).
+const fingers = new Map()
+let pinch = null
+const spread = () => { const [a, b] = [...fingers.values()]; return { d: Math.hypot(a.x - b.x, a.y - b.y), x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } }
+canvas.addEventListener("pointerdown", (e) => {
+  if (e.pointerType !== "touch") return
+  fingers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+  if (fingers.size === 2) { pinch = spread(); drag = null }
+}, true)
+canvas.addEventListener("pointermove", (e) => {
+  if (!fingers.has(e.pointerId)) return
+  fingers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+  if (pinch && fingers.size === 2) { const p = spread(); if (pinch.d > 0) zoomBy(p.d / pinch.d, p.x, p.y); pinch = p; e.stopImmediatePropagation() }
+}, true)
+const lift = (e) => { fingers.delete(e.pointerId); if (fingers.size < 2) pinch = null }
+canvas.addEventListener("pointerup", lift, true)
+canvas.addEventListener("pointercancel", lift, true)
 addEventListener("resize", () => view.resize())
 addEventListener("keydown", (e) => { if (runner.key(e, true)) return; if (walk?.active && document.body.classList.contains("play") && walk.key(e, true)) return; if (e.key === "Escape") select(null) })
 addEventListener("keyup", (e) => { runner.key(e, false); walk?.key(e, false) })
@@ -615,6 +653,9 @@ function frame(now) {
   loadSprites().then(() => requestAnimationFrame(frame))
   try { if (localStorage.getItem("tideland.mode") === "local") state.wallet = localWallet() } catch {}
   renderWallet(); updateBalance()
+  // A first-time visitor sees the landing at once; its "who needs help" list fills in when the island has been read.
+  { const q0 = new URLSearchParams(location.search)
+    if (!q0.get("h") && !location.pathname.startsWith("/h/") && !house.myHome() && !["run", "explore", "play", "t", "x", "embed"].some((k) => q0.has(k))) house.home() }
   toast("Reading the island from Arkiv…", 0)
   // the node sometimes turns away a burst of reads for a moment: try a few times before saying anything
   for (let i = 0; i < 4; i++) {

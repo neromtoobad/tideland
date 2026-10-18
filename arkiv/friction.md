@@ -203,7 +203,7 @@ Pinned, the same wait is fine (3 of 3): `client.select().where(...).atBlock(p.bl
 `fetch()` pin by default when it returns a cursor. Until then, say in the pagination docs that walks longer than one
 block need `.atBlock()`, and give this case its own `QueryError` kind instead of the generic `-32005`.
 **What we changed:** [`collect()`](../shared/tideland.js) re-runs any read that needs a second page pinned to the first
-page's block, and starts over on a stale cursor or a read that hangs past 8 s.
+page's block, and starts over on a stale cursor or a read that hangs past 20 s.
 
 ---
 

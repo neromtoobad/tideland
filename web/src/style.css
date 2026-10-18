@@ -332,7 +332,9 @@ body.play .me-bottom { display: flex; flex-direction: column; align-items: cente
 .chat { display: flex; gap: 6px; width: 100%; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 6px; box-shadow: var(--shadow); }
 .chat input { border: 0; background: transparent; } .chat input:focus { outline: none; }
 body.play canvas#world { opacity: 1; filter: none; pointer-events: auto; cursor: pointer; }
-body.play .brand, body.play .tide, body.play .inspector, body.play .wallet, body.play .zoom { display: none !important; }
+body.play .brand, body.play .tide, body.play .inspector, body.play .wallet { display: none !important; }
+/* walking: zoom stays available, mid-right, clear of the chat bar */
+body.play .zoom { top: 50%; bottom: auto; transform: translateY(-50%); z-index: 5; }
 body.play .house { left: auto; right: 16px; transform: none; top: 68px; width: 400px; max-height: calc(100vh - 84px); }
 body.play .house .close { display: block; }
 @media (max-width: 760px) {
