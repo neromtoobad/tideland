@@ -262,7 +262,24 @@ const envKey = () => globalThis.process?.env?.ARKIV_ACCESS_KEY || undefined
  * (ANON_COST_LIMITED), and viem's default retry-with-backoff turns that into a silent ~40 s hang.
  */
 function transport({ rpc = RPC_URL, apiKey = envKey() } = {}) {
-  return http(rpc, { retryCount: 0, timeout: 20_000, fetchOptions: apiKey ? { headers: { "X-API-KEY": apiKey } } : undefined })
+  return http(rpc, { retryCount: 0, timeout: 20_000, fetchFn: apiKey ? (url, init) => keyedFetch(url, init, apiKey) : undefined })
+}
+
+/**
+ * fetch with an Arkiv access key that steps aside when the key's own quota is spent (HTTP 429 QUOTA_EXCEEDED): the call
+ * is repeated without the key, on the caller's anonymous budget, and the key rests for 15 minutes. Used by the bots,
+ * the crew and the read relay, so a spent key never takes the island down with it.
+ */
+let keyRestsUntil = 0
+export async function keyedFetch(url, init = {}, apiKey = envKey()) {
+  const bare = () => fetch(url, init)
+  if (!apiKey || Date.now() < keyRestsUntil) return bare()
+  const r = await fetch(url, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers ?? {})), "X-API-KEY": apiKey } })
+  if (r.status !== 429) return r
+  const text = await r.clone().text().catch(() => "")
+  if (!/QUOTA_EXCEEDED|quota exhausted/i.test(text)) return r
+  keyRestsUntil = Date.now() + 15 * 60_000
+  return bare()
 }
 
 export function publicClient({ ws = false, rpc, apiKey } = {}) {

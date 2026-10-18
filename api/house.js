@@ -1,14 +1,12 @@
 // GET /h/<key>: the shareable link for a house. Crawlers (X, WhatsApp, Telegram…) get a title with the
 // live countdown and a playable card; people are sent straight on to the house page.
+import { keyedFetch } from "../shared/tideland.js"
+
 const RPC = "https://rpc.tiramisu.db-chain.testnet.arkiv.network"
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c])
 
 async function rpc(method, params) {
-  const r = await fetch(RPC, {
-    method: "POST",
-    headers: { "content-type": "application/json", ...(process.env.ARKIV_ACCESS_KEY ? { "X-API-KEY": process.env.ARKIV_ACCESS_KEY } : {}) },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  })
+  const r = await keyedFetch(RPC, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) })
   return (await r.json()).result
 }
 

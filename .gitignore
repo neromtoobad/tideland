@@ -7,3 +7,4 @@ dist
 art/raw
 .env*
 .keeper.key
+.rec/
